@@ -12,7 +12,7 @@
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { background: #0f0e0c; color: #f0ebe3; font-family: 'DM Sans', sans-serif; }
-    input, select, textarea { outline: none; background: #1a1814; color: #f0ebe3; border: 1px solid #2e2b26; border-radius: 10px; padding: 10px 14px; font-family: 'DM Sans', sans-serif; font-size: 14px; width: 100%; transition: border 0.2s; }
+    input, select { outline: none; background: #1a1814; color: #f0ebe3; border: 1px solid #2e2b26; border-radius: 10px; padding: 10px 14px; font-family: 'DM Sans', sans-serif; font-size: 14px; width: 100%; transition: border 0.2s; }
     input:focus, select:focus { border-color: var(--accent, #f5a623); }
     input::placeholder { color: #8a847a; }
     button { cursor: pointer; font-family: 'DM Sans', sans-serif; border: none; border-radius: 10px; font-size: 14px; font-weight: 500; transition: all 0.18s; }
@@ -82,7 +82,7 @@ const Spinner = () => (
   </div>
 );
 
-// ─── GİRİŞ EKRANI ───────────────────────────────────────────────────────────
+// ─── GİRİŞ ──────────────────────────────────────────────────────────────────
 const GirisEkrani = ({ onGiris }) => {
   const [email, setEmail] = useState("");
   const [sifre, setSifre] = useState("");
@@ -95,20 +95,16 @@ const GirisEkrani = ({ onGiris }) => {
     setHata(""); setYukleniyor(true);
     try {
       if (kayitModu) {
-        // Kayıt ol
         const { data: authData, error: authErr } = await sb.auth.signUp({ email, password: sifre });
         if (authErr) throw authErr;
-        // İşletme oluştur
         const { data: isletme, error: isletmeErr } = await sb.from("isletmeler").insert({ ad: isletmeAd, renk: "#f5a623" }).select().single();
         if (isletmeErr) throw isletmeErr;
-        // Kullanıcıyı kaydet
         await sb.from("kullanicilar").insert({ id: authData.user.id, isletme_id: isletme.id, email, rol: "mudur" });
-        setHata("✅ Kayıt başarılı! E-postanı doğrula, sonra giriş yap.");
+        setHata("✅ Kayıt başarılı! Giriş yapabilirsin.");
         setKayitModu(false);
       } else {
         const { data, error } = await sb.auth.signInWithPassword({ email, password: sifre });
         if (error) throw error;
-        // Kullanıcı & işletme bilgilerini çek
         const { data: kullanici } = await sb.from("kullanicilar").select("*, isletmeler(*)").eq("id", data.user.id).single();
         onGiris(kullanici);
       }
@@ -131,20 +127,14 @@ const GirisEkrani = ({ onGiris }) => {
             {kayitModu ? "Hesap Oluştur" : "Giriş Yap"}
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            {kayitModu && (
-              <input placeholder="İşletme adı (örn: Burger House)" value={isletmeAd} onChange={e => setIsletmeAd(e.target.value)} />
-            )}
+            {kayitModu && <input placeholder="İşletme adı" value={isletmeAd} onChange={e => setIsletmeAd(e.target.value)} />}
             <input type="email" placeholder="E-posta" value={email} onChange={e => setEmail(e.target.value)} />
-            <input type="password" placeholder="Şifre" value={sifre} onChange={e => setSifre(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && girisYap()} />
+            <input type="password" placeholder="Şifre" value={sifre} onChange={e => setSifre(e.target.value)} onKeyDown={e => e.key === "Enter" && girisYap()} />
             {hata && <div style={{ color: hata.startsWith("✅") ? C.green : C.red, fontSize: 13 }}>{hata}</div>}
-            <Btn onClick={girisYap} disabled={yukleniyor}>
-              {yukleniyor ? "Lütfen bekle..." : kayitModu ? "Hesap Oluştur" : "Giriş Yap"}
-            </Btn>
+            <Btn onClick={girisYap} disabled={yukleniyor}>{yukleniyor ? "Lütfen bekle..." : kayitModu ? "Hesap Oluştur" : "Giriş Yap"}</Btn>
             <div style={{ textAlign: "center", fontSize: 13, color: C.muted }}>
               {kayitModu ? "Hesabın var mı?" : "Hesabın yok mu?"}{" "}
-              <span onClick={() => { setKayitModu(!kayitModu); setHata(""); }}
-                style={{ color: C.accent, cursor: "pointer", fontWeight: 600 }}>
+              <span onClick={() => { setKayitModu(!kayitModu); setHata(""); }} style={{ color: C.accent, cursor: "pointer", fontWeight: 600 }}>
                 {kayitModu ? "Giriş yap" : "Kayıt ol"}
               </span>
             </div>
@@ -155,24 +145,41 @@ const GirisEkrani = ({ onGiris }) => {
   );
 };
 
-// ─── AYARLAR ────────────────────────────────────────────────────────────────
+// ─── AYARLAR (LOGO YÜKLEMELİ) ───────────────────────────────────────────────
 const Ayarlar = ({ kullanici, setKullanici }) => {
   const [isletme, setIsletme] = useState(kullanici.isletmeler);
   const [kayit, setKayit] = useState(false);
-  const [yeniKullanici, setYeniKullanici] = useState({ email: "", sifre: "", rol: "kasiyer" });
+  const [yeniK, setYeniK] = useState({ email: "", sifre: "", rol: "kasiyer" });
   const [mesaj, setMesaj] = useState("");
+  const [logoYukleniyor, setLogoYukleniyor] = useState(false);
+  const fileRef = useRef();
 
   const isletmeGuncelle = async () => {
     const { error } = await sb.from("isletmeler").update({ ad: isletme.ad, renk: isletme.renk }).eq("id", isletme.id);
     if (!error) { setMesaj("✅ Kaydedildi!"); setTimeout(() => setMesaj(""), 2000); }
   };
 
+  const logoYukle = async (e) => {
+    const dosya = e.target.files[0];
+    if (!dosya) return;
+    setLogoYukleniyor(true);
+    const dosyaAdi = `${isletme.id}-logo.${dosya.name.split('.').pop()}`;
+    const { error: upErr } = await sb.storage.from("logolar").upload(dosyaAdi, dosya, { upsert: true });
+    if (upErr) { setMesaj("❌ Logo yüklenemedi: " + upErr.message); setLogoYukleniyor(false); return; }
+    const { data: urlData } = sb.storage.from("logolar").getPublicUrl(dosyaAdi);
+    const logoUrl = urlData.publicUrl;
+    await sb.from("isletmeler").update({ logo_url: logoUrl }).eq("id", isletme.id);
+    setIsletme({ ...isletme, logo_url: logoUrl });
+    setMesaj("✅ Logo yüklendi!"); setLogoYukleniyor(false);
+    setTimeout(() => setMesaj(""), 2000);
+  };
+
   const kasiyerEkle = async () => {
     try {
-      const { data, error } = await sb.auth.signUp({ email: yeniKullanici.email, password: yeniKullanici.sifre });
+      const { data, error } = await sb.auth.signUp({ email: yeniK.email, password: yeniK.sifre });
       if (error) throw error;
-      await sb.from("kullanicilar").insert({ id: data.user.id, isletme_id: isletme.id, email: yeniKullanici.email, rol: yeniKullanici.rol });
-      setMesaj("✅ Kullanıcı eklendi!"); setYeniKullanici({ email: "", sifre: "", rol: "kasiyer" }); setKayit(false);
+      await sb.from("kullanicilar").insert({ id: data.user.id, isletme_id: isletme.id, email: yeniK.email, rol: yeniK.rol });
+      setMesaj("✅ Kullanıcı eklendi!"); setYeniK({ email: "", sifre: "", rol: "kasiyer" }); setKayit(false);
       setTimeout(() => setMesaj(""), 2000);
     } catch (e) { setMesaj("❌ " + e.message); }
   };
@@ -186,6 +193,24 @@ const Ayarlar = ({ kullanici, setKullanici }) => {
 
       <Card style={{ marginBottom: 12 }}>
         <div style={{ fontWeight: 600, marginBottom: 12, color: C.muted, fontSize: 13 }}>İŞLETME BİLGİLERİ</div>
+
+        {/* Logo */}
+        <div style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 14 }}>
+          <div onClick={() => fileRef.current.click()}
+            style={{ width: 72, height: 72, borderRadius: 14, border: `2px dashed ${C.border}`, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", overflow: "hidden", background: C.surface }}>
+            {isletme.logo_url
+              ? <img src={isletme.logo_url} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              : <span style={{ fontSize: 28 }}>📷</span>}
+          </div>
+          <div>
+            <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>İşletme Logosu</div>
+            <Btn small variant="ghost" onClick={() => fileRef.current.click()} disabled={logoYukleniyor}>
+              {logoYukleniyor ? "Yükleniyor..." : "Logo Seç"}
+            </Btn>
+            <input ref={fileRef} type="file" accept="image/*" onChange={logoYukle} style={{ display: "none" }} />
+          </div>
+        </div>
+
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <input placeholder="İşletme adı" value={isletme.ad} onChange={e => setIsletme({...isletme, ad: e.target.value})} />
           <div>
@@ -193,6 +218,7 @@ const Ayarlar = ({ kullanici, setKullanici }) => {
             <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
               <input type="color" value={isletme.renk || "#f5a623"} onChange={e => setIsletme({...isletme, renk: e.target.value})}
                 style={{ width: 48, height: 40, padding: 4, borderRadius: 8, cursor: "pointer" }} />
+              <div style={{ width: 32, height: 32, borderRadius: 8, background: isletme.renk || "#f5a623" }} />
               <span style={{ color: C.muted, fontSize: 13 }}>{isletme.renk}</span>
             </div>
           </div>
@@ -208,9 +234,9 @@ const Ayarlar = ({ kullanici, setKullanici }) => {
           </div>
           {kayit && (
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <input placeholder="E-posta" value={yeniKullanici.email} onChange={e => setYeniKullanici({...yeniKullanici, email: e.target.value})} />
-              <input type="password" placeholder="Şifre" value={yeniKullanici.sifre} onChange={e => setYeniKullanici({...yeniKullanici, sifre: e.target.value})} />
-              <select value={yeniKullanici.rol} onChange={e => setYeniKullanici({...yeniKullanici, rol: e.target.value})}>
+              <input placeholder="E-posta" value={yeniK.email} onChange={e => setYeniK({...yeniK, email: e.target.value})} />
+              <input type="password" placeholder="Şifre" value={yeniK.sifre} onChange={e => setYeniK({...yeniK, sifre: e.target.value})} />
+              <select value={yeniK.rol} onChange={e => setYeniK({...yeniK, rol: e.target.value})}>
                 <option value="kasiyer">Kasiyer</option>
                 <option value="mudur">Müdür</option>
               </select>
@@ -222,7 +248,7 @@ const Ayarlar = ({ kullanici, setKullanici }) => {
 
       <Card>
         <div style={{ fontSize: 14, color: C.muted, marginBottom: 4 }}>Giriş yapan</div>
-        <div style={{ fontWeight: 600, marginBottom: 4 }}>{kullanici.email}</div>
+        <div style={{ fontWeight: 600, marginBottom: 6 }}>{kullanici.email}</div>
         <Badge color={kullanici.rol === "mudur" ? C.accent : C.green}>{kullanici.rol === "mudur" ? "Müdür" : "Kasiyer"}</Badge>
         <div style={{ marginTop: 16 }}>
           <Btn variant="danger" onClick={cikisYap}>Çıkış Yap</Btn>
@@ -244,8 +270,11 @@ const Dashboard = ({ isletme, malzemeler, menu, satislar }) => {
   return (
     <div className="fade-in" style={{ padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        {isletme?.logo_url && (
+          <img src={isletme.logo_url} style={{ width: 44, height: 44, borderRadius: 10, objectFit: "cover", border: `1px solid ${C.border}` }} />
+        )}
         <div style={{ fontFamily: "Syne", fontSize: 22, fontWeight: 800, color: accent }}>
-          🍔 {isletme?.ad || "BurgerStock"}
+          {!isletme?.logo_url && "🍔 "}{isletme?.ad || "BurgerStock"}
         </div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
@@ -298,10 +327,7 @@ const Malzemeler = ({ isletmeId, malzemeler, setMalzemeler }) => {
     setModal(null);
   };
 
-  const sil = async (id) => {
-    await sb.from("malzemeler").delete().eq("id", id);
-    setMalzemeler(malzemeler.filter(m => m.id !== id));
-  };
+  const sil = async (id) => { await sb.from("malzemeler").delete().eq("id", id); setMalzemeler(malzemeler.filter(m => m.id !== id)); };
 
   const stokGuncelle = async () => {
     const m = malzemeler.find(x => x.id === stokModal);
@@ -323,10 +349,7 @@ const Malzemeler = ({ isletmeId, malzemeler, setMalzemeler }) => {
           return (
             <Card key={m.id} style={dusuk ? { border: `1px solid ${C.red}44` } : {}}>
               <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <div>
-                  <div style={{ fontWeight: 600 }}>{m.ad}</div>
-                  <div style={{ fontSize: 13, color: C.muted }}>Birim: {m.birim} • ₺{m.fiyat}</div>
-                </div>
+                <div><div style={{ fontWeight: 600 }}>{m.ad}</div><div style={{ fontSize: 13, color: C.muted }}>Birim: {m.birim} • ₺{m.fiyat}</div></div>
                 <Badge color={dusuk ? C.red : C.green}>{m.stok} {m.birim}</Badge>
               </div>
               <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>Min: {m.min_stok} {m.birim}</div>
@@ -477,12 +500,8 @@ const Satis = ({ isletmeId, kullaniciId, menu, malzemeler, setMalzemeler, setSat
       });
       return { ...m, stok: Math.max(0, m.stok - azalan) };
     });
-    // Stokları güncelle
-    for (const m of yeniMalzemeler) {
-      await sb.from("malzemeler").update({ stok: m.stok }).eq("id", m.id);
-    }
+    for (const m of yeniMalzemeler) await sb.from("malzemeler").update({ stok: m.stok }).eq("id", m.id);
     setMalzemeler(yeniMalzemeler);
-    // Satışı kaydet
     const { data } = await sb.from("satislar").insert({ isletme_id: isletmeId, kullanici_id: kullaniciId, items: sepet, toplam, tarih: new Date().toISOString() }).select().single();
     setSatislar(s => [...s, data]);
     setSepet([]); setBasarili(true); setTimeout(() => setBasarili(false), 2500);
@@ -499,6 +518,7 @@ const Satis = ({ isletmeId, kullaniciId, menu, malzemeler, setMalzemeler, setSat
             <div style={{ color: C.accent, fontWeight: 700, marginTop: 4 }}>₺{m.fiyat}</div>
           </Card>
         ))}
+        {menu.length === 0 && <div style={{ color: C.muted, gridColumn:"1/-1", textAlign:"center", padding:40 }}>Önce menü ekle</div>}
       </div>
       {sepet.length > 0 && (
         <Card style={{ border: `1px solid ${C.accent}44` }}>
@@ -509,7 +529,7 @@ const Satis = ({ isletmeId, kullaniciId, menu, malzemeler, setMalzemeler, setSat
               <div style={{ display:"flex", alignItems:"center", gap:8 }}>
                 <span style={{ color: C.muted, fontSize: 13 }}>₺{(item.fiyat*item.qty).toFixed(0)}</span>
                 <button onClick={() => cikar(item.menuId)} style={{ background:C.border,border:"none",color:C.text,borderRadius:6,width:26,height:26,cursor:"pointer" }}>−</button>
-                <span style={{ width:20, textAlign:"center", fontWeight:600 }}>{item.qty}</span>
+                <span style={{ width:20,textAlign:"center",fontWeight:600 }}>{item.qty}</span>
                 <button onClick={() => ekle(menu.find(m=>m.id===item.menuId))} style={{ background:C.accent,border:"none",color:"#000",borderRadius:6,width:26,height:26,cursor:"pointer" }}>+</button>
               </div>
             </div>
@@ -610,10 +630,7 @@ function App() {
     setMalzemeler(m || []); setMenu(mn || []); setSatislar(s || []);
   };
 
-  const handleGiris = async (k) => {
-    setKullanici(k);
-    await veriYukle(k.isletme_id);
-  };
+  const handleGiris = async (k) => { setKullanici(k); await veriYukle(k.isletme_id); };
 
   if (yukleniyor) return (
     <div style={{ minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center", background: C.bg }}>
