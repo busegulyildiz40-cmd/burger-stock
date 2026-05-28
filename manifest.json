@@ -1,0 +1,22 @@
+{
+  "name": "BurgerStock",
+  "short_name": "BurgerStock",
+  "description": "Restoran Stok Yönetimi",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f0e0c",
+  "theme_color": "#f5a623",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "https://fav.farm/🍔",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://fav.farm/🍔",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
