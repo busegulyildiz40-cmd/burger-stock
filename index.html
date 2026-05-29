@@ -606,15 +606,28 @@ const Satis = ({ isletmeId, kullaniciId, menu, malzemeler, setMalzemeler, setSat
 
 // ─── RAPORLAR ───────────────────────────────────────────────────────────────
 const Raporlar = ({ satislar, menu, malzemeler, isletme }) => {
+  const [sekme, setSekme] = useState("satis");
   const [filtre, setFiltre] = useState("bugun");
   const simdi = new Date();
-  const f = satislar.filter(s => {
+
+  const satirSatislar = satislar.filter(s => !s.tip || s.tip !== "zayi");
+  const zayiler = satislar.filter(s => s.tip === "zayi");
+
+  const f = satirSatislar.filter(s => {
     const t = new Date(s.tarih);
     if (filtre === "bugun") return t.toDateString() === simdi.toDateString();
     if (filtre === "hafta") return (simdi - t) < 7*24*3600*1000;
     if (filtre === "ay") return t.getMonth() === simdi.getMonth() && t.getFullYear() === simdi.getFullYear();
     return true;
   });
+  const fz = zayiler.filter(s => {
+    const t = new Date(s.tarih);
+    if (filtre === "bugun") return t.toDateString() === simdi.toDateString();
+    if (filtre === "hafta") return (simdi - t) < 7*24*3600*1000;
+    if (filtre === "ay") return t.getMonth() === simdi.getMonth() && t.getFullYear() === simdi.getFullYear();
+    return true;
+  });
+
   const ciro = f.reduce((t, s) => t + s.toplam, 0);
   const sayac = {};
   f.forEach(s => (s.items||[]).forEach(i => { sayac[i.menuId] = (sayac[i.menuId]||0) + i.qty; }));
@@ -622,20 +635,14 @@ const Raporlar = ({ satislar, menu, malzemeler, isletme }) => {
   const excelIndir = () => {
     const filtrAd = { bugun:"Bugün", hafta:"Son 7 Gün", ay:"Bu Ay", tum:"Tüm Zamanlar" }[filtre];
     const rows = [];
-
-    // Başlık
-    rows.push([`${isletme?.ad || "BurgerStock"} - Satış Raporu`]);
+    rows.push([`${isletme?.ad || "BurgerStock"} - Rapor`]);
     rows.push([`Dönem: ${filtrAd}`, `Tarih: ${new Date().toLocaleDateString("tr-TR")}`]);
     rows.push([]);
-
-    // Özet
-    rows.push(["ÖZET"]);
+    rows.push(["SATIŞ ÖZETI"]);
     rows.push(["Toplam Ciro", `₺${ciro.toLocaleString()}`]);
     rows.push(["Sipariş Sayısı", f.length]);
     rows.push(["Ortalama Sipariş", f.length > 0 ? `₺${(ciro/f.length).toFixed(0)}` : "₺0"]);
     rows.push([]);
-
-    // Ürün bazlı
     rows.push(["ÜRÜN BAZLI SATIŞLAR"]);
     rows.push(["Ürün", "Adet", "Birim Fiyat", "Toplam"]);
     menu.forEach(m => {
@@ -643,30 +650,21 @@ const Raporlar = ({ satislar, menu, malzemeler, isletme }) => {
       rows.push([m.ad, adet, `₺${m.fiyat}`, `₺${(adet * m.fiyat).toLocaleString()}`]);
     });
     rows.push([]);
-
-    // Sipariş listesi
-    rows.push(["SİPARİŞ GEÇMİŞİ"]);
-    rows.push(["Tarih", "Ürünler", "Toplam"]);
-    [...f].reverse().forEach(s => {
-      rows.push([
-        new Date(s.tarih).toLocaleString("tr-TR"),
-        (s.items||[]).map(i => `${i.ad} ×${i.qty}`).join(", "),
-        `₺${s.toplam}`
-      ]);
+    rows.push(["ZAYİ GEÇMİŞİ"]);
+    rows.push(["Tarih", "Malzeme", "Miktar", "Sebep"]);
+    [...fz].reverse().forEach(z => {
+      (z.items||[]).forEach(i => {
+        rows.push([new Date(z.tarih).toLocaleString("tr-TR"), i.ad?.replace("ZAYİ: ",""), i.qty, i.sebep || "-"]);
+      });
     });
     rows.push([]);
-
-    // Stok durumu
     rows.push(["STOK DURUMU"]);
     rows.push(["Malzeme", "Birim", "Mevcut Stok", "Min. Stok", "Durum"]);
     malzemeler.forEach(m => {
       rows.push([m.ad, m.birim, m.stok, m.min_stok, m.stok <= m.min_stok ? "⚠️ Düşük" : "✅ Normal"]);
     });
-
-    // CSV olarak indir (Excel'de açılır)
     const csvContent = rows.map(row => row.map(cell => `"${String(cell).replace(/"/g,'""')}"`).join(",")).join("\n");
-    const BOM = "\uFEFF"; // Türkçe karakter desteği
-    const blob = new Blob([BOM + csvContent], { type: "text/csv;charset=utf-8;" });
+    const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -681,44 +679,84 @@ const Raporlar = ({ satislar, menu, malzemeler, isletme }) => {
         <span style={{ fontFamily:"Syne", fontSize:20, fontWeight:700 }}>Raporlar</span>
         <Btn small onClick={excelIndir}>📥 Excel İndir</Btn>
       </div>
-      <div style={{ display:"flex", gap:8, marginBottom:16, flexWrap:"wrap" }}>
-        {[["bugun","Bugün"],["hafta","7 Gün"],["ay","Bu Ay"],["tum","Tümü"]].map(([v,l]) => (
-          <button key={v} onClick={() => setFiltre(v)}
-            style={{ background: filtre===v ? C.accent : C.card, color: filtre===v ? "#000":"#fff", border:`1px solid ${filtre===v?C.accent:C.border}`, borderRadius:20, padding:"6px 14px", fontSize:13, cursor:"pointer" }}>
+
+      {/* Sekme */}
+      <div style={{ display:"flex", gap:8, marginBottom:14 }}>
+        {[["satis","📈 Satışlar"],["zayi","🗑 Zayi Geçmişi"]].map(([v,l]) => (
+          <button key={v} onClick={() => setSekme(v)}
+            style={{ background: sekme===v ? C.accent : C.card, color: sekme===v ? "#000":"#fff", border:`1px solid ${sekme===v?C.accent:C.border}`, borderRadius:20, padding:"7px 16px", fontSize:13, cursor:"pointer", fontWeight: sekme===v ? 600:400 }}>
             {l}
           </button>
         ))}
       </div>
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12, marginBottom:14 }}>
-        <Card><div style={{ fontSize:20, fontWeight:700, color:C.green }}>₺{ciro.toLocaleString()}</div><div style={{ fontSize:11, color:C.muted }}>Ciro</div></Card>
-        <Card><div style={{ fontSize:20, fontWeight:700, color:C.accent }}>{f.length}</div><div style={{ fontSize:11, color:C.muted }}>Sipariş</div></Card>
-        <Card><div style={{ fontSize:20, fontWeight:700, color:C.text }}>₺{f.length > 0 ? (ciro/f.length).toFixed(0) : 0}</div><div style={{ fontSize:11, color:C.muted }}>Ortalama</div></Card>
+
+      {/* Dönem filtresi */}
+      <div style={{ display:"flex", gap:8, marginBottom:14, flexWrap:"wrap" }}>
+        {[["bugun","Bugün"],["hafta","7 Gün"],["ay","Bu Ay"],["tum","Tümü"]].map(([v,l]) => (
+          <button key={v} onClick={() => setFiltre(v)}
+            style={{ background: filtre===v ? C.surface : "transparent", color: filtre===v ? C.text : C.muted, border:`1px solid ${filtre===v?C.border:"transparent"}`, borderRadius:20, padding:"5px 12px", fontSize:12, cursor:"pointer" }}>
+            {l}
+          </button>
+        ))}
       </div>
-      <Card style={{ marginBottom:14 }}>
-        <div style={{ fontSize:13, color:C.muted, marginBottom:12 }}>ÜRÜN BAZLI</div>
-        {menu.map(m => (
-          <div key={m.id} style={{ display:"flex", justifyContent:"space-between", padding:"7px 0", borderBottom:`1px solid ${C.border}`, fontSize:14 }}>
-            <span>{m.ad}</span>
-            <div style={{ display:"flex", gap:12 }}>
-              <span style={{ color:C.muted }}>{sayac[m.id]||0} adet</span>
-              <span style={{ color:C.accent }}>₺{((sayac[m.id]||0)*m.fiyat).toLocaleString()}</span>
-            </div>
+
+      {sekme === "satis" && (
+        <>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12, marginBottom:14 }}>
+            <Card><div style={{ fontSize:20, fontWeight:700, color:C.green }}>₺{ciro.toLocaleString()}</div><div style={{ fontSize:11, color:C.muted }}>Ciro</div></Card>
+            <Card><div style={{ fontSize:20, fontWeight:700, color:C.accent }}>{f.length}</div><div style={{ fontSize:11, color:C.muted }}>Sipariş</div></Card>
+            <Card><div style={{ fontSize:20, fontWeight:700, color:C.text }}>₺{f.length > 0 ? (ciro/f.length).toFixed(0) : 0}</div><div style={{ fontSize:11, color:C.muted }}>Ortalama</div></Card>
           </div>
-        ))}
-      </Card>
-      <Card>
-        <div style={{ fontSize:13, color:C.muted, marginBottom:12 }}>SON SİPARİŞLER</div>
-        {[...f].reverse().slice(0,10).map(s => (
-          <div key={s.id} style={{ padding:"8px 0", borderBottom:`1px solid ${C.border}`, fontSize:13 }}>
-            <div style={{ display:"flex", justifyContent:"space-between" }}>
-              <span style={{ color:C.muted }}>{new Date(s.tarih).toLocaleString("tr-TR")}</span>
-              <span style={{ color:C.accent, fontWeight:600 }}>₺{s.toplam}</span>
-            </div>
-            <div style={{ color:C.muted, fontSize:12, marginTop:2 }}>{(s.items||[]).map(i=>`${i.ad} ×${i.qty}`).join(", ")}</div>
-          </div>
-        ))}
-        {f.length === 0 && <div style={{ color:C.muted, textAlign:"center", padding:20 }}>Bu dönemde satış yok</div>}
-      </Card>
+          <Card style={{ marginBottom:14 }}>
+            <div style={{ fontSize:13, color:C.muted, marginBottom:12 }}>ÜRÜN BAZLI</div>
+            {menu.map(m => (
+              <div key={m.id} style={{ display:"flex", justifyContent:"space-between", padding:"7px 0", borderBottom:`1px solid ${C.border}`, fontSize:14 }}>
+                <span>{m.ad}</span>
+                <div style={{ display:"flex", gap:12 }}>
+                  <span style={{ color:C.muted }}>{sayac[m.id]||0} adet</span>
+                  <span style={{ color:C.accent }}>₺{((sayac[m.id]||0)*m.fiyat).toLocaleString()}</span>
+                </div>
+              </div>
+            ))}
+          </Card>
+          <Card>
+            <div style={{ fontSize:13, color:C.muted, marginBottom:12 }}>SON SİPARİŞLER</div>
+            {[...f].reverse().slice(0,10).map(s => (
+              <div key={s.id} style={{ padding:"8px 0", borderBottom:`1px solid ${C.border}`, fontSize:13 }}>
+                <div style={{ display:"flex", justifyContent:"space-between" }}>
+                  <span style={{ color:C.muted }}>{new Date(s.tarih).toLocaleString("tr-TR")}</span>
+                  <span style={{ color:C.accent, fontWeight:600 }}>₺{s.toplam}</span>
+                </div>
+                <div style={{ color:C.muted, fontSize:12, marginTop:2 }}>{(s.items||[]).map(i=>`${i.ad} ×${i.qty}`).join(", ")}</div>
+              </div>
+            ))}
+            {f.length === 0 && <div style={{ color:C.muted, textAlign:"center", padding:20 }}>Bu dönemde satış yok</div>}
+          </Card>
+        </>
+      )}
+
+      {sekme === "zayi" && (
+        <Card>
+          <div style={{ fontSize:13, color:C.muted, marginBottom:12 }}>ZAYİ GEÇMİŞİ</div>
+          {[...fz].reverse().map(z => (
+            (z.items||[]).map((item, i) => (
+              <div key={`${z.id}-${i}`} style={{ padding:"10px 0", borderBottom:`1px solid ${C.border}` }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                  <div>
+                    <div style={{ fontWeight:600, fontSize:14, color:C.red }}>
+                      {String(item.ad || "").replace("ZAYİ: ", "")}
+                    </div>
+                    {item.sebep && <div style={{ fontSize:12, color:C.muted, marginTop:2 }}>Sebep: {item.sebep}</div>}
+                  </div>
+                  <Badge color={C.red}>{item.qty} adet</Badge>
+                </div>
+                <div style={{ fontSize:12, color:C.muted, marginTop:4 }}>{new Date(z.tarih).toLocaleString("tr-TR")}</div>
+              </div>
+            ))
+          ))}
+          {fz.length === 0 && <div style={{ color:C.muted, textAlign:"center", padding:20 }}>Bu dönemde zayi kaydı yok</div>}
+        </Card>
+      )}
     </div>
   );
 };
