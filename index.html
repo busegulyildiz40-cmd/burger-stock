@@ -4,8 +4,6 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>BurgerStock</title>
-  <link rel="manifest" href="/manifest.json" />
-<meta name="theme-color" content="#f5a623" />
   <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
   <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
@@ -310,43 +308,91 @@ const Dashboard = ({ isletme, malzemeler, menu, satislar }) => {
   );
 };
 
+// ─── OFFLINE CACHE ──────────────────────────────────────────────────────────
+const localCache = {
+  set: (key, val) => { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} },
+  get: (key) => { try { return JSON.parse(localStorage.getItem(key)); } catch { return null; } },
+};
+
 // ─── MALZEMELER ─────────────────────────────────────────────────────────────
-const Malzemeler = ({ isletmeId, malzemeler, setMalzemeler }) => {
+const Malzemeler = ({ isletmeId, malzemeler, setMalzemeler, cevrimici }) => {
   const [modal, setModal] = useState(null);
   const [form, setForm] = useState({ ad: "", birim: "adet", stok: "", min_stok: "", fiyat: "" });
-  const [stokModal, setStokModal] = useState(null);
-  const [stokEkle, setStokEkle] = useState("");
+  const [islemModal, setIslemModal] = useState(null); // { tip: "ekle"|"zayi", id }
+  const [islemForm, setIslemForm] = useState({ miktar: "", sebep: "" });
+  const [filtre, setFiltre] = useState("tum"); // tum | dusuk
 
   const kaydet = async () => {
     if (!form.ad) return;
+    if (!cevrimici) { alert("İnternet bağlantısı yok, bu işlem için internet gerekli."); return; }
     if (modal === "yeni") {
       const { data } = await sb.from("malzemeler").insert({ ...form, stok: +form.stok, min_stok: +form.min_stok, fiyat: +form.fiyat, isletme_id: isletmeId }).select().single();
-      setMalzemeler([...malzemeler, data]);
+      const yeni = [...malzemeler, data];
+      setMalzemeler(yeni); localCache.set("malzemeler_" + isletmeId, yeni);
     } else {
       await sb.from("malzemeler").update({ ...form, stok: +form.stok, min_stok: +form.min_stok, fiyat: +form.fiyat }).eq("id", modal);
-      setMalzemeler(malzemeler.map(m => m.id === modal ? { ...m, ...form, stok: +form.stok, min_stok: +form.min_stok, fiyat: +form.fiyat } : m));
+      const yeni = malzemeler.map(m => m.id === modal ? { ...m, ...form, stok: +form.stok, min_stok: +form.min_stok, fiyat: +form.fiyat } : m);
+      setMalzemeler(yeni); localCache.set("malzemeler_" + isletmeId, yeni);
     }
     setModal(null);
   };
 
-  const sil = async (id) => { await sb.from("malzemeler").delete().eq("id", id); setMalzemeler(malzemeler.filter(m => m.id !== id)); };
-
-  const stokGuncelle = async () => {
-    const m = malzemeler.find(x => x.id === stokModal);
-    const yeniStok = m.stok + +stokEkle;
-    await sb.from("malzemeler").update({ stok: yeniStok }).eq("id", stokModal);
-    setMalzemeler(malzemeler.map(x => x.id === stokModal ? { ...x, stok: yeniStok } : x));
-    setStokModal(null); setStokEkle("");
+  const sil = async (id) => {
+    if (!cevrimici) { alert("Silmek için internet gerekli."); return; }
+    await sb.from("malzemeler").delete().eq("id", id);
+    const yeni = malzemeler.filter(m => m.id !== id);
+    setMalzemeler(yeni); localCache.set("malzemeler_" + isletmeId, yeni);
   };
+
+  const islemYap = async () => {
+    if (!islemForm.miktar) return;
+    if (!cevrimici) { alert("Bu işlem için internet gerekli."); return; }
+    const m = malzemeler.find(x => x.id === islemModal.id);
+    let yeniStok;
+    if (islemModal.tip === "ekle") {
+      yeniStok = m.stok + +islemForm.miktar;
+    } else {
+      yeniStok = Math.max(0, m.stok - +islemForm.miktar);
+    }
+    await sb.from("malzemeler").update({ stok: yeniStok }).eq("id", islemModal.id);
+    // Zayi kaydı için not ekle (basit log)
+    if (islemModal.tip === "zayi" && islemForm.sebep) {
+      await sb.from("satislar").insert({
+        isletme_id: isletmeId,
+        items: [{ ad: `ZAYİ: ${m.ad}`, qty: +islemForm.miktar, sebep: islemForm.sebep }],
+        toplam: 0,
+        tarih: new Date().toISOString(),
+        tip: "zayi"
+      });
+    }
+    const yeni = malzemeler.map(x => x.id === islemModal.id ? { ...x, stok: yeniStok } : x);
+    setMalzemeler(yeni); localCache.set("malzemeler_" + isletmeId, yeni);
+    setIslemModal(null); setIslemForm({ miktar: "", sebep: "" });
+  };
+
+  const gosterilen = filtre === "dusuk" ? malzemeler.filter(m => m.stok <= m.min_stok) : malzemeler;
 
   return (
     <div className="fade-in" style={{ padding: 16 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+      {!cevrimici && (
+        <div style={{ background: C.warning+"22", border:`1px solid ${C.warning}44`, color: C.warning, borderRadius:10, padding:"8px 12px", marginBottom:12, fontSize:13, display:"flex", alignItems:"center", gap:6 }}>
+          📡 Çevrimdışı mod — son kaydedilen veriler gösteriliyor
+        </div>
+      )}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <span style={{ fontFamily: "Syne", fontSize: 20, fontWeight: 700 }}>Malzemeler</span>
         <Btn small onClick={() => { setForm({ ad:"",birim:"adet",stok:"",min_stok:"",fiyat:"" }); setModal("yeni"); }}>+ Ekle</Btn>
       </div>
+      <div style={{ display:"flex", gap:8, marginBottom:14 }}>
+        {[["tum","Tümü"],["dusuk","⚠️ Düşük"]].map(([v,l]) => (
+          <button key={v} onClick={() => setFiltre(v)}
+            style={{ background: filtre===v ? C.accent : C.card, color: filtre===v ? "#000":"#fff", border:`1px solid ${filtre===v?C.accent:C.border}`, borderRadius:20, padding:"6px 14px", fontSize:13, cursor:"pointer" }}>
+            {l}
+          </button>
+        ))}
+      </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {malzemeler.map(m => {
+        {gosterilen.map(m => {
           const dusuk = m.stok <= m.min_stok;
           return (
             <Card key={m.id} style={dusuk ? { border: `1px solid ${C.red}44` } : {}}>
@@ -355,16 +401,17 @@ const Malzemeler = ({ isletmeId, malzemeler, setMalzemeler }) => {
                 <Badge color={dusuk ? C.red : C.green}>{m.stok} {m.birim}</Badge>
               </div>
               <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>Min: {m.min_stok} {m.birim}</div>
-              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-                <Btn small variant="success" onClick={() => { setStokModal(m.id); setStokEkle(""); }}>📦 Stok Ekle</Btn>
+              <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap:"wrap" }}>
+                <Btn small variant="success" onClick={() => { setIslemModal({tip:"ekle", id:m.id}); setIslemForm({miktar:"",sebep:""}); }}>📦 Stok Ekle</Btn>
+                <Btn small variant="danger" onClick={() => { setIslemModal({tip:"zayi", id:m.id}); setIslemForm({miktar:"",sebep:""}); }}>🗑 Zayi</Btn>
                 <Btn small variant="ghost" onClick={() => { setForm({ ad:m.ad,birim:m.birim,stok:m.stok,min_stok:m.min_stok,fiyat:m.fiyat }); setModal(m.id); }}>✏️</Btn>
-                <Btn small variant="danger" onClick={() => sil(m.id)}>🗑</Btn>
               </div>
             </Card>
           );
         })}
-        {malzemeler.length === 0 && <div style={{ color: C.muted, textAlign: "center", padding: 40 }}>Henüz malzeme yok</div>}
+        {gosterilen.length === 0 && <div style={{ color: C.muted, textAlign: "center", padding: 40 }}>Henüz malzeme yok</div>}
       </div>
+
       {modal && (
         <Modal title={modal === "yeni" ? "Yeni Malzeme" : "Düzenle"} onClose={() => setModal(null)}>
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -381,13 +428,24 @@ const Malzemeler = ({ isletmeId, malzemeler, setMalzemeler }) => {
           </div>
         </Modal>
       )}
-      {stokModal && (
-        <Modal title="Stok Ekle" onClose={() => setStokModal(null)}>
-          <div style={{ color: C.muted, fontSize: 14, marginBottom: 10 }}>
-            {malzemeler.find(m => m.id === stokModal)?.ad} — Mevcut: {malzemeler.find(m => m.id === stokModal)?.stok}
+
+      {islemModal && (
+        <Modal
+          title={islemModal.tip === "ekle" ? "📦 Stok Ekle" : "🗑 Zayi Girişi"}
+          onClose={() => setIslemModal(null)}>
+          <div style={{ color: C.muted, fontSize: 14, marginBottom: 12 }}>
+            <span style={{ fontWeight:600, color: C.text }}>{malzemeler.find(m => m.id === islemModal.id)?.ad}</span>
+            {" "}— Mevcut: <span style={{ color: C.accent }}>{malzemeler.find(m => m.id === islemModal.id)?.stok} {malzemeler.find(m => m.id === islemModal.id)?.birim}</span>
           </div>
-          <input type="number" placeholder="Eklenecek miktar" value={stokEkle} onChange={e => setStokEkle(e.target.value)} style={{ marginBottom: 12 }} />
-          <Btn onClick={stokGuncelle}>Ekle</Btn>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <input type="number" placeholder={islemModal.tip === "ekle" ? "Eklenecek miktar" : "Zayi miktarı"} value={islemForm.miktar} onChange={e => setIslemForm({...islemForm, miktar: e.target.value})} />
+            {islemModal.tip === "zayi" && (
+              <input placeholder="Zayi sebebi (örn: bozulma, döküldü...)" value={islemForm.sebep} onChange={e => setIslemForm({...islemForm, sebep: e.target.value})} />
+            )}
+            <Btn variant={islemModal.tip === "ekle" ? "success" : "danger"} onClick={islemYap}>
+              {islemModal.tip === "ekle" ? "Stok Ekle" : "Zayi Kaydet"}
+            </Btn>
+          </div>
         </Modal>
       )}
     </div>
@@ -547,7 +605,7 @@ const Satis = ({ isletmeId, kullaniciId, menu, malzemeler, setMalzemeler, setSat
 };
 
 // ─── RAPORLAR ───────────────────────────────────────────────────────────────
-const Raporlar = ({ satislar, menu }) => {
+const Raporlar = ({ satislar, menu, malzemeler, isletme }) => {
   const [filtre, setFiltre] = useState("bugun");
   const simdi = new Date();
   const f = satislar.filter(s => {
@@ -561,9 +619,68 @@ const Raporlar = ({ satislar, menu }) => {
   const sayac = {};
   f.forEach(s => (s.items||[]).forEach(i => { sayac[i.menuId] = (sayac[i.menuId]||0) + i.qty; }));
 
+  const excelIndir = () => {
+    const filtrAd = { bugun:"Bugün", hafta:"Son 7 Gün", ay:"Bu Ay", tum:"Tüm Zamanlar" }[filtre];
+    const rows = [];
+
+    // Başlık
+    rows.push([`${isletme?.ad || "BurgerStock"} - Satış Raporu`]);
+    rows.push([`Dönem: ${filtrAd}`, `Tarih: ${new Date().toLocaleDateString("tr-TR")}`]);
+    rows.push([]);
+
+    // Özet
+    rows.push(["ÖZET"]);
+    rows.push(["Toplam Ciro", `₺${ciro.toLocaleString()}`]);
+    rows.push(["Sipariş Sayısı", f.length]);
+    rows.push(["Ortalama Sipariş", f.length > 0 ? `₺${(ciro/f.length).toFixed(0)}` : "₺0"]);
+    rows.push([]);
+
+    // Ürün bazlı
+    rows.push(["ÜRÜN BAZLI SATIŞLAR"]);
+    rows.push(["Ürün", "Adet", "Birim Fiyat", "Toplam"]);
+    menu.forEach(m => {
+      const adet = sayac[m.id] || 0;
+      rows.push([m.ad, adet, `₺${m.fiyat}`, `₺${(adet * m.fiyat).toLocaleString()}`]);
+    });
+    rows.push([]);
+
+    // Sipariş listesi
+    rows.push(["SİPARİŞ GEÇMİŞİ"]);
+    rows.push(["Tarih", "Ürünler", "Toplam"]);
+    [...f].reverse().forEach(s => {
+      rows.push([
+        new Date(s.tarih).toLocaleString("tr-TR"),
+        (s.items||[]).map(i => `${i.ad} ×${i.qty}`).join(", "),
+        `₺${s.toplam}`
+      ]);
+    });
+    rows.push([]);
+
+    // Stok durumu
+    rows.push(["STOK DURUMU"]);
+    rows.push(["Malzeme", "Birim", "Mevcut Stok", "Min. Stok", "Durum"]);
+    malzemeler.forEach(m => {
+      rows.push([m.ad, m.birim, m.stok, m.min_stok, m.stok <= m.min_stok ? "⚠️ Düşük" : "✅ Normal"]);
+    });
+
+    // CSV olarak indir (Excel'de açılır)
+    const csvContent = rows.map(row => row.map(cell => `"${String(cell).replace(/"/g,'""')}"`).join(",")).join("\n");
+    const BOM = "\uFEFF"; // Türkçe karakter desteği
+    const blob = new Blob([BOM + csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${isletme?.ad || "BurgerStock"}-Rapor-${filtrAd}-${new Date().toLocaleDateString("tr-TR").replace(/\//g,"-")}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="fade-in" style={{ padding: 16 }}>
-      <div style={{ fontFamily:"Syne", fontSize:20, fontWeight:700, marginBottom:16 }}>Raporlar</div>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+        <span style={{ fontFamily:"Syne", fontSize:20, fontWeight:700 }}>Raporlar</span>
+        <Btn small onClick={excelIndir}>📥 Excel İndir</Btn>
+      </div>
       <div style={{ display:"flex", gap:8, marginBottom:16, flexWrap:"wrap" }}>
         {[["bugun","Bugün"],["hafta","7 Gün"],["ay","Bu Ay"],["tum","Tümü"]].map(([v,l]) => (
           <button key={v} onClick={() => setFiltre(v)}
@@ -572,9 +689,10 @@ const Raporlar = ({ satislar, menu }) => {
           </button>
         ))}
       </div>
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:14 }}>
-        <Card><div style={{ fontSize:22, fontWeight:700, color:C.green }}>₺{ciro.toLocaleString()}</div><div style={{ fontSize:12, color:C.muted }}>Ciro</div></Card>
-        <Card><div style={{ fontSize:22, fontWeight:700, color:C.accent }}>{f.length}</div><div style={{ fontSize:12, color:C.muted }}>Sipariş</div></Card>
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12, marginBottom:14 }}>
+        <Card><div style={{ fontSize:20, fontWeight:700, color:C.green }}>₺{ciro.toLocaleString()}</div><div style={{ fontSize:11, color:C.muted }}>Ciro</div></Card>
+        <Card><div style={{ fontSize:20, fontWeight:700, color:C.accent }}>{f.length}</div><div style={{ fontSize:11, color:C.muted }}>Sipariş</div></Card>
+        <Card><div style={{ fontSize:20, fontWeight:700, color:C.text }}>₺{f.length > 0 ? (ciro/f.length).toFixed(0) : 0}</div><div style={{ fontSize:11, color:C.muted }}>Ortalama</div></Card>
       </div>
       <Card style={{ marginBottom:14 }}>
         <div style={{ fontSize:13, color:C.muted, marginBottom:12 }}>ÜRÜN BAZLI</div>
@@ -596,6 +714,7 @@ const Raporlar = ({ satislar, menu }) => {
               <span style={{ color:C.muted }}>{new Date(s.tarih).toLocaleString("tr-TR")}</span>
               <span style={{ color:C.accent, fontWeight:600 }}>₺{s.toplam}</span>
             </div>
+            <div style={{ color:C.muted, fontSize:12, marginTop:2 }}>{(s.items||[]).map(i=>`${i.ad} ×${i.qty}`).join(", ")}</div>
           </div>
         ))}
         {f.length === 0 && <div style={{ color:C.muted, textAlign:"center", padding:20 }}>Bu dönemde satış yok</div>}
@@ -612,24 +731,65 @@ function App() {
   const [malzemeler, setMalzemeler] = useState([]);
   const [menu, setMenu] = useState([]);
   const [satislar, setSatislar] = useState([]);
+  const [cevrimici, setCevrimici] = useState(navigator.onLine);
+
+  useEffect(() => {
+    const online = () => setCevrimici(true);
+    const offline = () => setCevrimici(false);
+    window.addEventListener("online", online);
+    window.addEventListener("offline", offline);
+    return () => { window.removeEventListener("online", online); window.removeEventListener("offline", offline); };
+  }, []);
 
   useEffect(() => {
     sb.auth.getSession().then(async ({ data: { session } }) => {
       if (session) {
         const { data } = await sb.from("kullanicilar").select("*, isletmeler(*)").eq("id", session.user.id).single();
-        if (data) { setKullanici(data); await veriYukle(data.isletme_id); }
+        if (data) {
+          setKullanici(data);
+          if (navigator.onLine) {
+            await veriYukle(data.isletme_id);
+          } else {
+            // Offline: cache'den yükle
+            const m = localCache.get("malzemeler_" + data.isletme_id);
+            const mn = localCache.get("menu_" + data.isletme_id);
+            const s = localCache.get("satislar_" + data.isletme_id);
+            if (m) setMalzemeler(m);
+            if (mn) setMenu(mn);
+            if (s) setSatislar(s);
+          }
+        }
       }
       setYukleniyor(false);
     });
   }, []);
 
+  // İnternet gelince cache'i güncelle
+  useEffect(() => {
+    if (cevrimici && kullanici) veriYukle(kullanici.isletme_id);
+  }, [cevrimici]);
+
   const veriYukle = async (isletmeId) => {
-    const [{ data: m }, { data: mn }, { data: s }] = await Promise.all([
-      sb.from("malzemeler").select("*").eq("isletme_id", isletmeId),
-      sb.from("menu").select("*").eq("isletme_id", isletmeId),
-      sb.from("satislar").select("*").eq("isletme_id", isletmeId).order("tarih", { ascending: false }).limit(100),
-    ]);
-    setMalzemeler(m || []); setMenu(mn || []); setSatislar(s || []);
+    try {
+      const [{ data: m }, { data: mn }, { data: s }] = await Promise.all([
+        sb.from("malzemeler").select("*").eq("isletme_id", isletmeId),
+        sb.from("menu").select("*").eq("isletme_id", isletmeId),
+        sb.from("satislar").select("*").eq("isletme_id", isletmeId).order("tarih", { ascending: false }).limit(100),
+      ]);
+      setMalzemeler(m || []); setMenu(mn || []); setSatislar(s || []);
+      // Cache'e kaydet
+      localCache.set("malzemeler_" + isletmeId, m || []);
+      localCache.set("menu_" + isletmeId, mn || []);
+      localCache.set("satislar_" + isletmeId, s || []);
+    } catch(e) {
+      // Offline fallback
+      const m = localCache.get("malzemeler_" + isletmeId);
+      const mn = localCache.get("menu_" + isletmeId);
+      const s = localCache.get("satislar_" + isletmeId);
+      if (m) setMalzemeler(m);
+      if (mn) setMenu(mn);
+      if (s) setSatislar(s);
+    }
   };
 
   const handleGiris = async (k) => { setKullanici(k); await veriYukle(k.isletme_id); };
@@ -658,11 +818,16 @@ function App() {
 
   return (
     <div style={{ maxWidth: 540, margin: "0 auto", minHeight: "100vh", background: C.bg, paddingBottom: 80 }}>
+      {!cevrimici && (
+        <div style={{ background:"#e8a83022", borderBottom:`1px solid #e8a83044`, color:"#e8a830", padding:"8px 16px", fontSize:13, textAlign:"center" }}>
+          📡 Çevrimdışı — son kaydedilen veriler gösteriliyor
+        </div>
+      )}
       {sayfa === "dashboard" && <Dashboard isletme={isletme} malzemeler={malzemeler} menu={menu} satislar={satislar} />}
-      {sayfa === "malzemeler" && <Malzemeler isletmeId={kullanici.isletme_id} malzemeler={malzemeler} setMalzemeler={setMalzemeler} />}
+      {sayfa === "malzemeler" && <Malzemeler isletmeId={kullanici.isletme_id} malzemeler={malzemeler} setMalzemeler={setMalzemeler} cevrimici={cevrimici} />}
       {sayfa === "menu" && mudur && <Menu isletmeId={kullanici.isletme_id} menu={menu} setMenu={setMenu} malzemeler={malzemeler} />}
       {sayfa === "satis" && <Satis isletmeId={kullanici.isletme_id} kullaniciId={kullanici.id} menu={menu} malzemeler={malzemeler} setMalzemeler={setMalzemeler} setSatislar={setSatislar} />}
-      {sayfa === "raporlar" && mudur && <Raporlar satislar={satislar} menu={menu} />}
+      {sayfa === "raporlar" && mudur && <Raporlar satislar={satislar} menu={menu} malzemeler={malzemeler} isletme={isletme} />}
       {sayfa === "ayarlar" && <Ayarlar kullanici={kullanici} setKullanici={setKullanici} />}
       <div style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:540, background:C.surface, borderTop:`1px solid ${C.border}`, display:"flex", padding:"8px 0 12px" }}>
         {nav.map(n => (
