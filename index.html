@@ -146,7 +146,7 @@ const GirisEkrani = ({ onGiris }) => {
 };
 
 // ─── AYARLAR (LOGO YÜKLEMELİ) ───────────────────────────────────────────────
-const Ayarlar = ({ kullanici, setKullanici }) => {
+const Ayarlar = ({ kullanici, setKullanici, tema, setTema }) => {
   const [isletme, setIsletme] = useState(kullanici.isletmeler);
   const [kayit, setKayit] = useState(false);
   const [yeniK, setYeniK] = useState({ email: "", sifre: "", rol: "kasiyer" });
@@ -190,6 +190,20 @@ const Ayarlar = ({ kullanici, setKullanici }) => {
     <div className="fade-in" style={{ padding: 16 }}>
       <div style={{ fontFamily: "Syne", fontSize: 20, fontWeight: 700, marginBottom: 16 }}>Ayarlar</div>
       {mesaj && <div style={{ color: mesaj.startsWith("✅") ? C.green : C.red, marginBottom: 12, fontSize: 14 }}>{mesaj}</div>}
+
+      <Card style={{ marginBottom: 12 }}>
+        <div style={{ fontWeight: 600, marginBottom: 12, color: C.muted, fontSize: 13 }}>GÖRÜNÜM</div>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+          <div>
+            <div style={{ fontWeight:600, fontSize:14 }}>{tema === "dark" ? "🌙 Karanlık Tema" : "☀️ Açık Tema"}</div>
+            <div style={{ fontSize:12, color:C.muted, marginTop:2 }}>Uygulama arka planı</div>
+          </div>
+          <div onClick={() => setTema(tema === "dark" ? "light" : "dark")}
+            style={{ width:48, height:26, borderRadius:13, background: tema==="dark" ? C.accent : C.border, cursor:"pointer", position:"relative", transition:"all 0.2s" }}>
+            <div style={{ position:"absolute", top:3, left: tema==="dark" ? 24:3, width:20, height:20, borderRadius:"50%", background:"#fff", transition:"all 0.2s" }} />
+          </div>
+        </div>
+      </Card>
 
       <Card style={{ marginBottom: 12 }}>
         <div style={{ fontWeight: 600, marginBottom: 12, color: C.muted, fontSize: 13 }}>İŞLETME BİLGİLERİ</div>
@@ -250,7 +264,7 @@ const Ayarlar = ({ kullanici, setKullanici }) => {
         <div style={{ fontSize: 14, color: C.muted, marginBottom: 4 }}>Giriş yapan</div>
         <div style={{ fontWeight: 600, marginBottom: 6 }}>{kullanici.email}</div>
         <Badge color={kullanici.rol === "mudur" ? C.accent : C.green}>{kullanici.rol === "mudur" ? "Müdür" : "Kasiyer"}</Badge>
-        <div style={{ marginTop: 16 }}>
+        <div style={{ marginTop: 16, display:"flex", gap:8 }}>
           <Btn variant="danger" onClick={cikisYap}>Çıkış Yap</Btn>
         </div>
       </Card>
@@ -453,19 +467,23 @@ const Malzemeler = ({ isletmeId, malzemeler, setMalzemeler, cevrimici }) => {
 };
 
 // ─── MENÜ ───────────────────────────────────────────────────────────────────
-const Menu = ({ isletmeId, menu, setMenu, malzemeler }) => {
+const Menu = ({ isletmeId, menu, setMenu, malzemeler, kategoriler, setKategoriler }) => {
   const [modal, setModal] = useState(null);
-  const [form, setForm] = useState({ ad: "", fiyat: "", malzemeler: [] });
+  const [form, setForm] = useState({ ad: "", fiyat: "", malzemeler: [], kategori_id: "" });
   const [malzForm, setMalzForm] = useState({ id: "", qty: "" });
+  const [aktifKategori, setAktifKategori] = useState("tum");
+  const [kategoriModal, setKategoriModal] = useState(false);
+  const [yeniKategori, setYeniKategori] = useState("");
 
   const kaydet = async () => {
     if (!form.ad || !form.fiyat) return;
+    const veri = { ...form, fiyat: +form.fiyat, isletme_id: isletmeId, kategori_id: form.kategori_id ? +form.kategori_id : null };
     if (modal === "yeni") {
-      const { data } = await sb.from("menu").insert({ ...form, fiyat: +form.fiyat, isletme_id: isletmeId }).select().single();
+      const { data } = await sb.from("menu").insert(veri).select().single();
       setMenu([...menu, data]);
     } else {
-      await sb.from("menu").update({ ...form, fiyat: +form.fiyat }).eq("id", modal);
-      setMenu(menu.map(m => m.id === modal ? { ...m, ...form, fiyat: +form.fiyat } : m));
+      await sb.from("menu").update(veri).eq("id", modal);
+      setMenu(menu.map(m => m.id === modal ? { ...m, ...veri } : m));
     }
     setModal(null);
   };
@@ -478,38 +496,71 @@ const Menu = ({ isletmeId, menu, setMenu, malzemeler }) => {
     setMalzForm({ id: "", qty: "" });
   };
 
+  const kategoriEkle = async () => {
+    if (!yeniKategori) return;
+    const { data } = await sb.from("kategoriler").insert({ isletme_id: isletmeId, ad: yeniKategori }).select().single();
+    setKategoriler([...kategoriler, data]); setYeniKategori(""); setKategoriModal(false);
+  };
+
+  const kategoriSil = async (id) => {
+    await sb.from("kategoriler").delete().eq("id", id);
+    setKategoriler(kategoriler.filter(k => k.id !== id));
+  };
+
+  const filtreliMenu = aktifKategori === "tum" ? menu : aktifKategori === "kategorisiz" ? menu.filter(m => !m.kategori_id) : menu.filter(m => m.kategori_id === aktifKategori);
+
   return (
     <div className="fade-in" style={{ padding: 16 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <span style={{ fontFamily: "Syne", fontSize: 20, fontWeight: 700 }}>Menü</span>
-        <Btn small onClick={() => { setForm({ ad:"",fiyat:"",malzemeler:[] }); setModal("yeni"); }}>+ Ekle</Btn>
+        <div style={{ display:"flex", gap:8 }}>
+          <Btn small variant="ghost" onClick={() => setKategoriModal(true)}>🗂 Kategoriler</Btn>
+          <Btn small onClick={() => { setForm({ ad:"",fiyat:"",malzemeler:[],kategori_id:"" }); setModal("yeni"); }}>+ Ekle</Btn>
+        </div>
       </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {menu.map(m => (
-          <Card key={m.id}>
-            <div style={{ display: "flex", justifyContent: "space-between" }}>
-              <div style={{ fontWeight: 600 }}>{m.ad}</div>
-              <span style={{ color: C.accent, fontWeight: 700 }}>₺{m.fiyat}</span>
-            </div>
-            <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 6 }}>
-              {(m.malzemeler||[]).map(ml => {
-                const mObj = malzemeler.find(x => x.id === ml.id);
-                return mObj ? <Badge key={ml.id} color={C.muted}>{mObj.ad} ×{ml.qty}</Badge> : null;
-              })}
-            </div>
-            <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-              <Btn small variant="ghost" onClick={() => { setForm({ ad:m.ad,fiyat:m.fiyat,malzemeler:m.malzemeler||[] }); setModal(m.id); }}>✏️</Btn>
-              <Btn small variant="danger" onClick={() => sil(m.id)}>🗑</Btn>
-            </div>
-          </Card>
+
+      {/* Kategori filtreleri */}
+      <div style={{ display:"flex", gap:8, marginBottom:14, overflowX:"auto", paddingBottom:4 }}>
+        {[{id:"tum",ad:"Tümü"}, {id:"kategorisiz",ad:"Kategorisiz"}, ...kategoriler].map(k => (
+          <button key={k.id} onClick={() => setAktifKategori(k.id)}
+            style={{ background: aktifKategori===k.id ? C.accent : C.card, color: aktifKategori===k.id ? "#000":"#fff", border:`1px solid ${aktifKategori===k.id?C.accent:C.border}`, borderRadius:20, padding:"6px 14px", fontSize:13, cursor:"pointer", whiteSpace:"nowrap", fontWeight: aktifKategori===k.id?600:400 }}>
+            {k.ad}
+          </button>
         ))}
       </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {filtreliMenu.map(m => {
+          const kat = kategoriler.find(k => k.id === m.kategori_id);
+          return (
+            <Card key={m.id}>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <div>
+                  <div style={{ fontWeight: 600 }}>{m.ad}</div>
+                  {kat && <Badge color={C.muted}>{kat.ad}</Badge>}
+                </div>
+                <span style={{ color: C.accent, fontWeight: 700 }}>₺{m.fiyat}</span>
+              </div>
+              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                <Btn small variant="ghost" onClick={() => { setForm({ ad:m.ad,fiyat:m.fiyat,malzemeler:m.malzemeler||[],kategori_id:m.kategori_id||"" }); setModal(m.id); }}>✏️</Btn>
+                <Btn small variant="danger" onClick={() => sil(m.id)}>🗑</Btn>
+              </div>
+            </Card>
+          );
+        })}
+        {filtreliMenu.length === 0 && <div style={{ color:C.muted, textAlign:"center", padding:40 }}>Bu kategoride ürün yok</div>}
+      </div>
+
       {modal && (
         <Modal title={modal === "yeni" ? "Yeni Ürün" : "Düzenle"} onClose={() => setModal(null)}>
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <input placeholder="Ürün adı" value={form.ad} onChange={e => setForm({...form, ad: e.target.value})} />
             <input type="number" placeholder="Satış fiyatı ₺" value={form.fiyat} onChange={e => setForm({...form, fiyat: e.target.value})} />
-            <div style={{ fontSize: 13, color: C.muted }}>Malzeme Reçetesi</div>
+            <select value={form.kategori_id} onChange={e => setForm({...form, kategori_id: e.target.value})}>
+              <option value="">Kategori seç (isteğe bağlı)</option>
+              {kategoriler.map(k => <option key={k.id} value={k.id}>{k.ad}</option>)}
+            </select>
+            <div style={{ fontSize: 13, color: C.muted }}>Malzeme Reçetesi (isteğe bağlı)</div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
               {(form.malzemeler||[]).map(ml => {
                 const mObj = malzemeler.find(x => x.id === ml.id);
@@ -522,15 +573,35 @@ const Menu = ({ isletmeId, menu, setMenu, malzemeler }) => {
                 ) : null;
               })}
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr auto", gap: 8, alignItems: "center" }}>
-              <select value={malzForm.id} onChange={e => setMalzForm({...malzForm, id: e.target.value})}>
-                <option value="">Malzeme seç</option>
-                {malzemeler.map(m => <option key={m.id} value={m.id}>{m.ad}</option>)}
-              </select>
-              <input type="number" placeholder="Miktar" value={malzForm.qty} onChange={e => setMalzForm({...malzForm, qty: e.target.value})} />
-              <Btn small variant="ghost" onClick={malzEkle}>+</Btn>
-            </div>
+            {malzemeler.length > 0 && (
+              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr auto", gap: 8, alignItems: "center" }}>
+                <select value={malzForm.id} onChange={e => setMalzForm({...malzForm, id: e.target.value})}>
+                  <option value="">Malzeme seç</option>
+                  {malzemeler.map(m => <option key={m.id} value={m.id}>{m.ad}</option>)}
+                </select>
+                <input type="number" placeholder="Miktar" value={malzForm.qty} onChange={e => setMalzForm({...malzForm, qty: e.target.value})} />
+                <Btn small variant="ghost" onClick={malzEkle}>+</Btn>
+              </div>
+            )}
             <Btn onClick={kaydet}>Kaydet</Btn>
+          </div>
+        </Modal>
+      )}
+
+      {kategoriModal && (
+        <Modal title="🗂 Kategori Yönetimi" onClose={() => setKategoriModal(false)}>
+          <div style={{ display:"flex", gap:8, marginBottom:16 }}>
+            <input placeholder="Yeni kategori adı" value={yeniKategori} onChange={e => setYeniKategori(e.target.value)} />
+            <Btn small onClick={kategoriEkle}>Ekle</Btn>
+          </div>
+          <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+            {kategoriler.map(k => (
+              <div key={k.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 0", borderBottom:`1px solid ${C.border}` }}>
+                <span style={{ fontWeight:600 }}>{k.ad}</span>
+                <Btn small variant="danger" onClick={() => kategoriSil(k.id)}>🗑</Btn>
+              </div>
+            ))}
+            {kategoriler.length === 0 && <div style={{ color:C.muted, textAlign:"center", padding:20 }}>Henüz kategori yok</div>}
           </div>
         </Modal>
       )}
@@ -913,7 +984,36 @@ function App() {
   const [malzemeler, setMalzemeler] = useState([]);
   const [menu, setMenu] = useState([]);
   const [satislar, setSatislar] = useState([]);
+  const [kategoriler, setKategoriler] = useState([]);
+  const [tema, setTema] = useState(() => localStorage.getItem("tema") || "dark");
   const [cevrimici, setCevrimici] = useState(navigator.onLine);
+
+  // Tema renkleri dinamik
+  useEffect(() => {
+    const r = document.documentElement.style;
+    if (tema === "light") {
+      r.setProperty("--bg", "#f5f5f0");
+      r.setProperty("--surface", "#ffffff");
+      r.setProperty("--card", "#ffffff");
+      r.setProperty("--border", "#e0ddd8");
+      r.setProperty("--text", "#1a1814");
+      document.body.style.background = "#f5f5f0";
+      document.body.style.color = "#1a1814";
+    } else {
+      r.setProperty("--bg", "#0f0e0c");
+      r.setProperty("--surface", "#1a1814");
+      r.setProperty("--card", "#201e1a");
+      r.setProperty("--border", "#2e2b26");
+      r.setProperty("--text", "#f0ebe3");
+      document.body.style.background = "#0f0e0c";
+      document.body.style.color = "#f0ebe3";
+    }
+    localStorage.setItem("tema", tema);
+  }, [tema]);
+
+  const CT = tema === "light" ? {
+    ...C, bg: "#f5f5f0", surface: "#ffffff", card: "#ffffff", border: "#e0ddd8", text: "#1a1814"
+  } : C;
 
   useEffect(() => {
     const online = () => setCevrimici(true);
@@ -953,18 +1053,17 @@ function App() {
 
   const veriYukle = async (isletmeId) => {
     try {
-      const [{ data: m }, { data: mn }, { data: s }] = await Promise.all([
+      const [{ data: m }, { data: mn }, { data: s }, { data: k }] = await Promise.all([
         sb.from("malzemeler").select("*").eq("isletme_id", isletmeId),
         sb.from("menu").select("*").eq("isletme_id", isletmeId),
         sb.from("satislar").select("*").eq("isletme_id", isletmeId).order("tarih", { ascending: false }).limit(100),
+        sb.from("kategoriler").select("*").eq("isletme_id", isletmeId).order("sira"),
       ]);
-      setMalzemeler(m || []); setMenu(mn || []); setSatislar(s || []);
-      // Cache'e kaydet
+      setMalzemeler(m || []); setMenu(mn || []); setSatislar(s || []); setKategoriler(k || []);
       localCache.set("malzemeler_" + isletmeId, m || []);
       localCache.set("menu_" + isletmeId, mn || []);
       localCache.set("satislar_" + isletmeId, s || []);
     } catch(e) {
-      // Offline fallback
       const m = localCache.get("malzemeler_" + isletmeId);
       const mn = localCache.get("menu_" + isletmeId);
       const s = localCache.get("satislar_" + isletmeId);
@@ -999,7 +1098,7 @@ function App() {
   ];
 
   return (
-    <div style={{ maxWidth: 540, margin: "0 auto", minHeight: "100vh", background: C.bg, paddingBottom: 80 }}>
+    <div style={{ maxWidth: 540, margin: "0 auto", minHeight: "100vh", background: tema==="light" ? "#f5f5f0" : C.bg, paddingBottom: 80 }}>
       {!cevrimici && (
         <div style={{ background:"#e8a83022", borderBottom:`1px solid #e8a83044`, color:"#e8a830", padding:"8px 16px", fontSize:13, textAlign:"center" }}>
           📡 Çevrimdışı — son kaydedilen veriler gösteriliyor
@@ -1008,10 +1107,10 @@ function App() {
       {sayfa === "dashboard" && <Dashboard isletme={isletme} malzemeler={malzemeler} menu={menu} satislar={satislar} />}
       {sayfa === "masalar" && <Masalar isletmeId={kullanici.isletme_id} kullaniciId={kullanici.id} menu={menu} malzemeler={malzemeler} setMalzemeler={setMalzemeler} setSatislar={setSatislar} accent={accent} />}
       {sayfa === "malzemeler" && <Malzemeler isletmeId={kullanici.isletme_id} malzemeler={malzemeler} setMalzemeler={setMalzemeler} cevrimici={cevrimici} />}
-      {sayfa === "menu" && mudur && <Menu isletmeId={kullanici.isletme_id} menu={menu} setMenu={setMenu} malzemeler={malzemeler} />}
+      {sayfa === "menu" && mudur && <Menu isletmeId={kullanici.isletme_id} menu={menu} setMenu={setMenu} malzemeler={malzemeler} kategoriler={kategoriler} setKategoriler={setKategoriler} />}
       {sayfa === "raporlar" && mudur && <Raporlar satislar={satislar} menu={menu} malzemeler={malzemeler} isletme={isletme} />}
-      {sayfa === "ayarlar" && <Ayarlar kullanici={kullanici} setKullanici={setKullanici} />}
-      <div style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:540, background:C.surface, borderTop:`1px solid ${C.border}`, display:"flex", padding:"8px 0 12px" }}>
+      {sayfa === "ayarlar" && <Ayarlar kullanici={kullanici} setKullanici={setKullanici} tema={tema} setTema={setTema} />}
+      <div style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:540, background: tema==="light" ? "#ffffff" : C.surface, borderTop:`1px solid ${tema==="light"?"#e0ddd8":C.border}`, display:"flex", padding:"8px 0 12px" }}>
         {nav.map(n => (
           <button key={n.id} onClick={() => setSayfa(n.id)}
             style={{ flex:1, background:"none", border:"none", display:"flex", flexDirection:"column", alignItems:"center", gap:2, cursor:"pointer", position:"relative" }}>
