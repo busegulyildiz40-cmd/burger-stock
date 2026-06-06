@@ -1,4 +1,4 @@
-!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="tr">
 <head>
   <meta charset="UTF-8" />
@@ -787,7 +787,7 @@ const fisYazdir = (masa, items, toplam, isletme, odemeTipi) => {
       <div class="satir"><span>Ödeme:</span><span>${odemeLabel[odemeTipi]||odemeTipi}</span></div>
       <div class="cizgi"></div>
       <div class="merkez">Teşekkür ederiz!</div>
-    </body></html>
+    \x3C/body>\x3C/html>
   `;
   const pencere = window.open("", "_blank", "width=320,height=600");
   pencere.document.write(icerik);
@@ -1214,10 +1214,6 @@ function App() {
     }
     localStorage.setItem("tema", tema);
   }, [tema]);
-
-  const CT = tema === "light" ? {
-    ...C, bg: "#f5f5f0", surface: "#ffffff", card: "#ffffff", border: "#e0ddd8", text: "#1a1814"
-  } : C;
 
   useEffect(() => {
     const online = () => setCevrimici(true);
