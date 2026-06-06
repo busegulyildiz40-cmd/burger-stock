@@ -469,11 +469,181 @@ const Malzemeler = ({ isletmeId, malzemeler, setMalzemeler, cevrimici }) => {
 // ─── MENÜ ───────────────────────────────────────────────────────────────────
 const Menu = ({ isletmeId, menu, setMenu, malzemeler, kategoriler, setKategoriler }) => {
   const [modal, setModal] = useState(null);
-  const [form, setForm] = useState({ ad: "", fiyat: "", malzemeler: [], kategori_id: "" });
+  const [form, setForm] = useState({ ad: "", fiyat: "", malzemeler: [], kategori_id: "", fotograf_url: "" });
   const [malzForm, setMalzForm] = useState({ id: "", qty: "" });
   const [aktifKategori, setAktifKategori] = useState("tum");
   const [kategoriModal, setKategoriModal] = useState(false);
   const [yeniKategori, setYeniKategori] = useState("");
+  const [fotografYukleniyor, setFotografYukleniyor] = useState(false);
+  const fotografRef = useRef();
+
+  const fotografYukle = async (e) => {
+    const dosya = e.target.files[0];
+    if (!dosya) return;
+    setFotografYukleniyor(true);
+    const dosyaAdi = `${isletmeId}-${Date.now()}.${dosya.name.split('.').pop()}`;
+    const { error } = await sb.storage.from("urun-fotograflar").upload(dosyaAdi, dosya, { upsert: true });
+    if (error) { setFotografYukleniyor(false); return; }
+    const { data } = sb.storage.from("urun-fotograflar").getPublicUrl(dosyaAdi);
+    setForm(f => ({...f, fotograf_url: data.publicUrl}));
+    setFotografYukleniyor(false);
+  };
+
+  const kaydet = async () => {
+    if (!form.ad || !form.fiyat) return;
+    const veri = { ...form, fiyat: +form.fiyat, isletme_id: isletmeId, kategori_id: form.kategori_id ? +form.kategori_id : null };
+    if (modal === "yeni") {
+      const { data } = await sb.from("menu").insert(veri).select().single();
+      setMenu([...menu, data]);
+    } else {
+      await sb.from("menu").update(veri).eq("id", modal);
+      setMenu(menu.map(m => m.id === modal ? { ...m, ...veri } : m));
+    }
+    setModal(null);
+  };
+
+  const sil = async (id) => { await sb.from("menu").delete().eq("id", id); setMenu(menu.filter(m => m.id !== id)); };
+
+  const malzEkle = () => {
+    if (!malzForm.id || !malzForm.qty) return;
+    setForm({...form, malzemeler: [...(form.malzemeler||[]).filter(m => m.id !== +malzForm.id), { id: +malzForm.id, qty: +malzForm.qty }]});
+    setMalzForm({ id: "", qty: "" });
+  };
+
+  const kategoriEkle = async () => {
+    if (!yeniKategori) return;
+    const { data } = await sb.from("kategoriler").insert({ isletme_id: isletmeId, ad: yeniKategori }).select().single();
+    setKategoriler([...kategoriler, data]); setYeniKategori(""); setKategoriModal(false);
+  };
+
+  const kategoriSil = async (id) => {
+    await sb.from("kategoriler").delete().eq("id", id);
+    setKategoriler(kategoriler.filter(k => k.id !== id));
+  };
+
+  const filtreliMenu = aktifKategori === "tum" ? menu : aktifKategori === "kategorisiz" ? menu.filter(m => !m.kategori_id) : menu.filter(m => m.kategori_id === aktifKategori);
+
+  return (
+    <div className="fade-in" style={{ padding: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <span style={{ fontFamily: "Syne", fontSize: 20, fontWeight: 700 }}>Menü</span>
+        <div style={{ display:"flex", gap:8 }}>
+          <Btn small variant="ghost" onClick={() => setKategoriModal(true)}>🗂 Kategoriler</Btn>
+          <Btn small onClick={() => { setForm({ ad:"",fiyat:"",malzemeler:[],kategori_id:"",fotograf_url:"" }); setModal("yeni"); }}>+ Ekle</Btn>
+        </div>
+      </div>
+
+      {/* Kategori filtreleri */}
+      <div style={{ display:"flex", gap:8, marginBottom:14, overflowX:"auto", paddingBottom:4 }}>
+        {[{id:"tum",ad:"Tümü"}, {id:"kategorisiz",ad:"Kategorisiz"}, ...kategoriler].map(k => (
+          <button key={k.id} onClick={() => setAktifKategori(k.id)}
+            style={{ background: aktifKategori===k.id ? C.accent : C.card, color: aktifKategori===k.id ? "#000":"#fff", border:`1px solid ${aktifKategori===k.id?C.accent:C.border}`, borderRadius:20, padding:"6px 14px", fontSize:13, cursor:"pointer", whiteSpace:"nowrap", fontWeight: aktifKategori===k.id?600:400 }}>
+            {k.ad}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {filtreliMenu.map(m => {
+          const kat = kategoriler.find(k => k.id === m.kategori_id);
+          return (
+            <Card key={m.id}>
+              <div style={{ display: "flex", gap:12 }}>
+                {m.fotograf_url
+                  ? <img src={m.fotograf_url} style={{ width:64, height:64, borderRadius:10, objectFit:"cover", flexShrink:0 }} />
+                  : <div style={{ width:64, height:64, borderRadius:10, background:C.surface, display:"flex", alignItems:"center", justifyContent:"center", fontSize:24, flexShrink:0 }}>🍽️</div>
+                }
+                <div style={{ flex:1 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between" }}>
+                    <div style={{ fontWeight: 600 }}>{m.ad}</div>
+                    <span style={{ color: C.accent, fontWeight: 700 }}>₺{m.fiyat}</span>
+                  </div>
+                  {kat && <Badge color={C.muted}>{kat.ad}</Badge>}
+                  <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                    <Btn small variant="ghost" onClick={() => { setForm({ ad:m.ad,fiyat:m.fiyat,malzemeler:m.malzemeler||[],kategori_id:m.kategori_id||"",fotograf_url:m.fotograf_url||"" }); setModal(m.id); }}>✏️</Btn>
+                    <Btn small variant="danger" onClick={() => sil(m.id)}>🗑</Btn>
+                  </div>
+                </div>
+              </div>
+            </Card>
+          );
+        })}
+        {filtreliMenu.length === 0 && <div style={{ color:C.muted, textAlign:"center", padding:40 }}>Bu kategoride ürün yok</div>}
+      </div>
+
+      {modal && (
+        <Modal title={modal === "yeni" ? "Yeni Ürün" : "Düzenle"} onClose={() => setModal(null)}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {/* Fotoğraf */}
+            <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+              <div onClick={() => fotografRef.current.click()}
+                style={{ width:72, height:72, borderRadius:12, border:`2px dashed ${C.border}`, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", overflow:"hidden", background:C.surface, flexShrink:0 }}>
+                {form.fotograf_url
+                  ? <img src={form.fotograf_url} style={{ width:"100%", height:"100%", objectFit:"cover" }} />
+                  : <span style={{ fontSize:28 }}>📷</span>}
+              </div>
+              <div>
+                <div style={{ fontWeight:600, fontSize:13, marginBottom:4 }}>Ürün Fotoğrafı</div>
+                <Btn small variant="ghost" onClick={() => fotografRef.current.click()} disabled={fotografYukleniyor}>
+                  {fotografYukleniyor ? "Yükleniyor..." : "Fotoğraf Seç"}
+                </Btn>
+                <input ref={fotografRef} type="file" accept="image/*" onChange={fotografYukle} style={{ display:"none" }} />
+              </div>
+            </div>
+            <input placeholder="Ürün adı" value={form.ad} onChange={e => setForm({...form, ad: e.target.value})} />
+            <input type="number" placeholder="Satış fiyatı ₺" value={form.fiyat} onChange={e => setForm({...form, fiyat: e.target.value})} />
+            <select value={form.kategori_id} onChange={e => setForm({...form, kategori_id: e.target.value})}>
+              <option value="">Kategori seç (isteğe bağlı)</option>
+              {kategoriler.map(k => <option key={k.id} value={k.id}>{k.ad}</option>)}
+            </select>
+            <div style={{ fontSize: 13, color: C.muted }}>Malzeme Reçetesi (isteğe bağlı)</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {(form.malzemeler||[]).map(ml => {
+                const mObj = malzemeler.find(x => x.id === ml.id);
+                return mObj ? (
+                  <Badge key={ml.id} color={C.accent}>
+                    {mObj.ad} ×{ml.qty}
+                    <button onClick={() => setForm({...form, malzemeler: form.malzemeler.filter(x => x.id !== ml.id)})}
+                      style={{ background:"none",border:"none",color:C.accent,cursor:"pointer",marginLeft:4 }}>✕</button>
+                  </Badge>
+                ) : null;
+              })}
+            </div>
+            {malzemeler.length > 0 && (
+              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr auto", gap: 8, alignItems: "center" }}>
+                <select value={malzForm.id} onChange={e => setMalzForm({...malzForm, id: e.target.value})}>
+                  <option value="">Malzeme seç</option>
+                  {malzemeler.map(m => <option key={m.id} value={m.id}>{m.ad}</option>)}
+                </select>
+                <input type="number" placeholder="Miktar" value={malzForm.qty} onChange={e => setMalzForm({...malzForm, qty: e.target.value})} />
+                <Btn small variant="ghost" onClick={malzEkle}>+</Btn>
+              </div>
+            )}
+            <Btn onClick={kaydet}>Kaydet</Btn>
+          </div>
+        </Modal>
+      )}
+
+      {kategoriModal && (
+        <Modal title="🗂 Kategori Yönetimi" onClose={() => setKategoriModal(false)}>
+          <div style={{ display:"flex", gap:8, marginBottom:16 }}>
+            <input placeholder="Yeni kategori adı" value={yeniKategori} onChange={e => setYeniKategori(e.target.value)} />
+            <Btn small onClick={kategoriEkle}>Ekle</Btn>
+          </div>
+          <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+            {kategoriler.map(k => (
+              <div key={k.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 0", borderBottom:`1px solid ${C.border}` }}>
+                <span style={{ fontWeight:600 }}>{k.ad}</span>
+                <Btn small variant="danger" onClick={() => kategoriSil(k.id)}>🗑</Btn>
+              </div>
+            ))}
+            {kategoriler.length === 0 && <div style={{ color:C.muted, textAlign:"center", padding:20 }}>Henüz kategori yok</div>}
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+};
 
   const kaydet = async () => {
     if (!form.ad || !form.fiyat) return;
@@ -609,8 +779,160 @@ const Menu = ({ isletmeId, menu, setMenu, malzemeler, kategoriler, setKategorile
   );
 };
 
+// ─── MUTFAK EKRANI ───────────────────────────────────────────────────────────
+const MutfakEkrani = ({ isletmeId }) => {
+  const [adisyonlar, setAdisyonlar] = useState([]);
+  const [masalar, setMasalar] = useState([]);
+
+  useEffect(() => {
+    veriYukle();
+    // Her 10 saniyede otomatik güncelle
+    const interval = setInterval(veriYukle, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const veriYukle = async () => {
+    const [{ data: a }, { data: m }] = await Promise.all([
+      sb.from("adisyonlar").select("*").eq("isletme_id", isletmeId).eq("durum", "acik").order("acilis_tarihi"),
+      sb.from("masalar").select("*").eq("isletme_id", isletmeId),
+    ]);
+    setAdisyonlar(a?.filter(x => x.items?.length > 0) || []);
+    setMasalar(m || []);
+  };
+
+  const durumGuncelle = async (adisyonId, durum) => {
+    await sb.from("adisyonlar").update({ mutfak_durum: durum }).eq("id", adisyonId);
+    setAdisyonlar(a => a.map(x => x.id === adisyonId ? {...x, mutfak_durum: durum} : x));
+  };
+
+  const masaAd = (masaId) => masalar.find(m => m.id === masaId)?.ad || "Bilinmeyen";
+
+  const durumRenk = { bekliyor: C.red, hazirlaniyor: "#e8a830", hazir: C.green };
+  const durumLabel = { bekliyor: "⏳ Bekliyor", hazirlaniyor: "👨‍🍳 Hazırlanıyor", hazir: "✅ Hazır" };
+
+  return (
+    <div style={{ padding: 16, background: C.bg, minHeight: "100vh" }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+        <span style={{ fontFamily:"Syne", fontSize:22, fontWeight:800, color:C.accent }}>👨‍🍳 Mutfak Ekranı</span>
+        <Btn small variant="ghost" onClick={veriYukle}>🔄 Yenile</Btn>
+      </div>
+      {adisyonlar.length === 0 && (
+        <div style={{ textAlign:"center", padding:60, color:C.muted }}>
+          <div style={{ fontSize:48, marginBottom:12 }}>✅</div>
+          <div style={{ fontSize:18, fontWeight:600 }}>Tüm siparişler hazır!</div>
+        </div>
+      )}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(280px, 1fr))", gap:16 }}>
+        {adisyonlar.map(a => {
+          const durum = a.mutfak_durum || "bekliyor";
+          const renk = durumRenk[durum];
+          const sure = Math.floor((new Date() - new Date(a.acilis_tarihi)) / 60000);
+          return (
+            <div key={a.id} style={{ background:C.card, border:`2px solid ${renk}`, borderRadius:16, padding:16 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
+                <span style={{ fontFamily:"Syne", fontSize:18, fontWeight:700 }}>{masaAd(a.masa_id)}</span>
+                <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+                  <span style={{ color:C.muted, fontSize:12 }}>{sure} dk</span>
+                  <Badge color={renk}>{durumLabel[durum]}</Badge>
+                </div>
+              </div>
+              {(a.items||[]).map((item, i) => (
+                <div key={i} style={{ display:"flex", justifyContent:"space-between", padding:"6px 0", borderBottom:`1px solid ${C.border}`, fontSize:15 }}>
+                  <span style={{ fontWeight:600 }}>{item.ad}</span>
+                  <span style={{ color:C.accent, fontWeight:700 }}>×{item.qty}</span>
+                </div>
+              ))}
+              {a.mutfak_not && <div style={{ color:C.muted, fontSize:13, marginTop:8, fontStyle:"italic" }}>📝 {a.mutfak_not}</div>}
+              <div style={{ display:"flex", gap:8, marginTop:14 }}>
+                {durum === "bekliyor" && <Btn variant="ghost" style={{ flex:1, background:"#e8a83022", color:"#e8a830", border:`1px solid #e8a83044` }} onClick={() => durumGuncelle(a.id, "hazirlaniyor")}>👨‍🍳 Hazırlanıyor</Btn>}
+                {durum === "hazirlaniyor" && <Btn variant="success" style={{ flex:1 }} onClick={() => durumGuncelle(a.id, "hazir")}>✅ Hazır</Btn>}
+                {durum === "hazir" && <div style={{ color:C.green, fontWeight:600, textAlign:"center", flex:1 }}>✅ Servise Hazır!</div>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+// ─── QR MENÜ ────────────────────────────────────────────────────────────────
+const QRMenu = ({ isletme, menu, kategoriler }) => {
+  const qrUrl = `${window.location.origin}${window.location.pathname}?qrmenu=${isletme?.id}`;
+  const accent = isletme?.renk || C.accent;
+  const aktifKat = kategoriler.length > 0 ? kategoriler[0].id : "tum";
+  const [seciliKat, setSeciliKat] = useState("tum");
+
+  const filtreliMenu = seciliKat === "tum" ? menu : menu.filter(m => m.kategori_id === seciliKat);
+
+  return (
+    <div className="fade-in" style={{ padding: 16 }}>
+      <div style={{ fontFamily:"Syne", fontSize:20, fontWeight:700, marginBottom:16 }}>📱 QR Menü</div>
+      <Card style={{ marginBottom:14, textAlign:"center" }}>
+        <div style={{ fontSize:13, color:C.muted, marginBottom:12 }}>Müşteriler bu linki tarayarak menünüzü görebilir</div>
+        <div style={{ background:C.surface, borderRadius:10, padding:"10px 14px", fontSize:12, color:C.accent, wordBreak:"break-all", marginBottom:12 }}>
+          {qrUrl}
+        </div>
+        <Btn small onClick={() => { navigator.clipboard.writeText(qrUrl); alert("Link kopyalandı!"); }}>📋 Linki Kopyala</Btn>
+      </Card>
+      <Card>
+        <div style={{ fontSize:13, color:C.muted, marginBottom:12 }}>MENİ ÖNİZLEME</div>
+        <div style={{ display:"flex", gap:8, marginBottom:12, overflowX:"auto" }}>
+          {[{id:"tum",ad:"Tümü"}, ...kategoriler].map(k => (
+            <button key={k.id} onClick={() => setSeciliKat(k.id)}
+              style={{ background: seciliKat===k.id ? accent : C.surface, color: seciliKat===k.id ? "#000":"#fff", border:`1px solid ${seciliKat===k.id?accent:C.border}`, borderRadius:20, padding:"5px 12px", fontSize:12, cursor:"pointer", whiteSpace:"nowrap" }}>
+              {k.ad}
+            </button>
+          ))}
+        </div>
+        {filtreliMenu.map(m => (
+          <div key={m.id} style={{ display:"flex", gap:10, padding:"8px 0", borderBottom:`1px solid ${C.border}`, alignItems:"center" }}>
+            {m.fotograf_url
+              ? <img src={m.fotograf_url} style={{ width:48, height:48, borderRadius:8, objectFit:"cover", flexShrink:0 }} />
+              : <div style={{ width:48, height:48, borderRadius:8, background:C.surface, display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>🍽️</div>}
+            <div style={{ flex:1 }}>
+              <div style={{ fontWeight:600, fontSize:14 }}>{m.ad}</div>
+            </div>
+            <div style={{ color:accent, fontWeight:700 }}>₺{m.fiyat}</div>
+          </div>
+        ))}
+      </Card>
+    </div>
+  );
+};
+
+// ─── FİŞ YAZDIRMA ───────────────────────────────────────────────────────────
+const fisYazdir = (masa, items, toplam, isletme, odemeTipi) => {
+  const odemeLabel = { nakit:"Nakit", kart:"Kredi/Banka Kartı", havale:"Havale/QR" };
+  const icerik = `
+    <html><head><style>
+      body { font-family: monospace; font-size: 12px; margin: 0; padding: 10px; width: 280px; }
+      .merkez { text-align: center; }
+      .satir { display: flex; justify-content: space-between; margin: 2px 0; }
+      .cizgi { border-top: 1px dashed #000; margin: 6px 0; }
+      .bold { font-weight: bold; font-size: 14px; }
+    </style></head><body>
+      <div class="merkez bold">${isletme?.ad || "BurgerStock"}</div>
+      <div class="merkez">${new Date().toLocaleString("tr-TR")}</div>
+      <div class="cizgi"></div>
+      <div class="satir"><span>Masa:</span><span>${masa}</span></div>
+      <div class="cizgi"></div>
+      ${items.map(i => `<div class="satir"><span>${i.ad} ×${i.qty}</span><span>₺${(i.fiyat*i.qty).toFixed(0)}</span></div>`).join("")}
+      <div class="cizgi"></div>
+      <div class="satir bold"><span>TOPLAM</span><span>₺${toplam.toFixed(0)}</span></div>
+      <div class="satir"><span>Ödeme:</span><span>${odemeLabel[odemeTipi]||odemeTipi}</span></div>
+      <div class="cizgi"></div>
+      <div class="merkez">Teşekkür ederiz!</div>
+    </body></html>
+  `;
+  const pencere = window.open("", "_blank", "width=320,height=600");
+  pencere.document.write(icerik);
+  pencere.document.close();
+  pencere.print();
+};
+
 // ─── MASA YÖNETİMİ + ADİSYON ────────────────────────────────────────────────
-const Masalar = ({ isletmeId, kullaniciId, menu, malzemeler, setMalzemeler, setSatislar, accent }) => {
+const Masalar = ({ isletmeId, kullaniciId, menu, malzemeler, setMalzemeler, setSatislar, accent, kategoriler }) => {
   const [masalar, setMasalar] = useState([]);
   const [adisyonlar, setAdisyonlar] = useState([]);
   const [seciliMasa, setSeciliMasa] = useState(null);
@@ -619,6 +941,7 @@ const Masalar = ({ isletmeId, kullaniciId, menu, malzemeler, setMalzemeler, setS
   const [yeniMasaAd, setYeniMasaAd] = useState("");
   const [odemeModal, setOdemeModal] = useState(false);
   const [yukleniyor, setYukleniyor] = useState(true);
+  const [aktifKat, setAktifKat] = useState("tum");
 
   useEffect(() => { veriYukle(); }, []);
 
@@ -680,7 +1003,6 @@ const Masalar = ({ isletmeId, kullaniciId, menu, malzemeler, setMalzemeler, setS
   const hesapKapat = async (odemeTipi) => {
     const adisyon = seciliMasa.adisyon;
     if (!adisyon.items?.length) return;
-    // Stok düş
     const yeniMalzemeler = malzemeler.map(m => {
       let azalan = 0;
       (adisyon.items||[]).forEach(item => {
@@ -692,15 +1014,14 @@ const Masalar = ({ isletmeId, kullaniciId, menu, malzemeler, setMalzemeler, setS
     });
     for (const m of yeniMalzemeler) await sb.from("malzemeler").update({ stok: m.stok }).eq("id", m.id);
     setMalzemeler(yeniMalzemeler);
-    // Adisyonu kapat
     await sb.from("adisyonlar").update({ durum: "kapali", kapanis_tarihi: new Date().toISOString(), odeme_tipi: odemeTipi }).eq("id", adisyon.id);
-    // Satış kaydet
     const { data: satis } = await sb.from("satislar").insert({ isletme_id: isletmeId, kullanici_id: kullaniciId, items: adisyon.items, toplam: adisyon.toplam, tarih: new Date().toISOString(), masa: seciliMasa.ad, odeme_tipi: odemeTipi }).select().single();
     setSatislar(s => [...s, satis]);
-    // Masayı boşalt
     await sb.from("masalar").update({ durum: "bos" }).eq("id", seciliMasa.id);
     setMasalar(m => m.map(x => x.id === seciliMasa.id ? {...x, durum: "bos"} : x));
     setAdisyonlar(a => a.filter(x => x.id !== adisyon.id));
+    // Fiş yazdır
+    fisYazdir(seciliMasa.ad, adisyon.items, adisyon.toplam, null, odemeTipi);
     setOdemeModal(false); setAdisyonEkran(false); setSeciliMasa(null);
   };
 
@@ -725,14 +1046,33 @@ const Masalar = ({ isletmeId, kullaniciId, menu, malzemeler, setMalzemeler, setS
           <span style={{ fontFamily:"Syne", fontSize:18, fontWeight:700 }}>🪑 {seciliMasa.ad}</span>
         </div>
 
+        {/* Kategori filtreleri */}
+        <div style={{ display:"flex", gap:8, marginBottom:12, overflowX:"auto", paddingBottom:4 }}>
+          {[{id:"tum",ad:"Tümü"}, ...kategoriler].map(k => (
+            <button key={k.id} onClick={() => setAktifKat(k.id)}
+              style={{ background: aktifKat===k.id ? (accent||C.accent) : C.card, color: aktifKat===k.id ? "#000":"#fff", border:`1px solid ${aktifKat===k.id?(accent||C.accent):C.border}`, borderRadius:20, padding:"6px 14px", fontSize:12, cursor:"pointer", whiteSpace:"nowrap", fontWeight: aktifKat===k.id?600:400 }}>
+              {k.ad}
+            </button>
+          ))}
+        </div>
+
         {/* Menü */}
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:16 }}>
-          {menu.map(m => (
-            <Card key={m.id} style={{ cursor:"pointer" }} onClick={() => urunEkle(m)}>
-              <div style={{ fontWeight:600, fontSize:14 }}>{m.ad}</div>
-              <div style={{ color: accent||C.accent, fontWeight:700, marginTop:4 }}>₺{m.fiyat}</div>
-            </Card>
+          {menu.filter(m => aktifKat === "tum" || m.kategori_id === aktifKat).map(m => (
+            <div key={m.id} onClick={() => urunEkle(m)}
+              style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14, overflow:"hidden", cursor:"pointer", transition:"all 0.15s" }}>
+              {m.fotograf_url
+                ? <img src={m.fotograf_url} style={{ width:"100%", height:80, objectFit:"cover" }} />
+                : <div style={{ width:"100%", height:80, background:C.surface, display:"flex", alignItems:"center", justifyContent:"center", fontSize:28 }}>🍽️</div>}
+              <div style={{ padding:"8px 10px" }}>
+                <div style={{ fontWeight:600, fontSize:13 }}>{m.ad}</div>
+                <div style={{ color: accent||C.accent, fontWeight:700, fontSize:14, marginTop:2 }}>₺{m.fiyat}</div>
+              </div>
+            </div>
           ))}
+          {menu.filter(m => aktifKat === "tum" || m.kategori_id === aktifKat).length === 0 && (
+            <div style={{ color:C.muted, gridColumn:"1/-1", textAlign:"center", padding:30 }}>Bu kategoride ürün yok</div>
+          )}
         </div>
 
         {/* Adisyon */}
@@ -1093,7 +1433,9 @@ function App() {
     { id: "masalar", icon: "🪑", label: "Masalar" },
     { id: "malzemeler", icon: "📦", label: "Stok", badge: dusukStok },
     ...(mudur ? [{ id: "menu", icon: "🍔", label: "Menü" }] : []),
-    ...(mudur ? [{ id: "raporlar", icon: "📈", label: "Raporlar" }] : []),
+    ...(mudur ? [{ id: "mutfak", icon: "👨‍🍳", label: "Mutfak" }] : []),
+    ...(mudur ? [{ id: "qrmenu", icon: "📱", label: "QR" }] : []),
+    ...(mudur ? [{ id: "raporlar", icon: "📈", label: "Rapor" }] : []),
     { id: "ayarlar", icon: "⚙️", label: "Ayarlar" },
   ];
 
@@ -1105,9 +1447,11 @@ function App() {
         </div>
       )}
       {sayfa === "dashboard" && <Dashboard isletme={isletme} malzemeler={malzemeler} menu={menu} satislar={satislar} />}
-      {sayfa === "masalar" && <Masalar isletmeId={kullanici.isletme_id} kullaniciId={kullanici.id} menu={menu} malzemeler={malzemeler} setMalzemeler={setMalzemeler} setSatislar={setSatislar} accent={accent} />}
+      {sayfa === "masalar" && <Masalar isletmeId={kullanici.isletme_id} kullaniciId={kullanici.id} menu={menu} malzemeler={malzemeler} setMalzemeler={setMalzemeler} setSatislar={setSatislar} accent={accent} kategoriler={kategoriler} />}
       {sayfa === "malzemeler" && <Malzemeler isletmeId={kullanici.isletme_id} malzemeler={malzemeler} setMalzemeler={setMalzemeler} cevrimici={cevrimici} />}
       {sayfa === "menu" && mudur && <Menu isletmeId={kullanici.isletme_id} menu={menu} setMenu={setMenu} malzemeler={malzemeler} kategoriler={kategoriler} setKategoriler={setKategoriler} />}
+      {sayfa === "mutfak" && mudur && <MutfakEkrani isletmeId={kullanici.isletme_id} />}
+      {sayfa === "qrmenu" && mudur && <QRMenu isletme={isletme} menu={menu} kategoriler={kategoriler} />}
       {sayfa === "raporlar" && mudur && <Raporlar satislar={satislar} menu={menu} malzemeler={malzemeler} isletme={isletme} />}
       {sayfa === "ayarlar" && <Ayarlar kullanici={kullanici} setKullanici={setKullanici} tema={tema} setTema={setTema} />}
       <div style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:540, background: tema==="light" ? "#ffffff" : C.surface, borderTop:`1px solid ${tema==="light"?"#e0ddd8":C.border}`, display:"flex", padding:"8px 0 12px" }}>
