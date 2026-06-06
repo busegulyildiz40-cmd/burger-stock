@@ -184,7 +184,7 @@ const Ayarlar = ({ kullanici, setKullanici }) => {
     } catch (e) { setMesaj("❌ " + e.message); }
   };
 
-  const cikisYap = () => { sb.auth.signOut(); window.location.reload(); };
+  const cikisYap = async () => { await sb.auth.signOut(); window.location.replace(window.location.href.split('?')[0]); };
 
   return (
     <div className="fade-in" style={{ padding: 16 }}>
