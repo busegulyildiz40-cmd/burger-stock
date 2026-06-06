@@ -538,22 +538,81 @@ const Menu = ({ isletmeId, menu, setMenu, malzemeler }) => {
   );
 };
 
-// ─── SATIŞ ──────────────────────────────────────────────────────────────────
-const Satis = ({ isletmeId, kullaniciId, menu, malzemeler, setMalzemeler, setSatislar }) => {
-  const [sepet, setSepet] = useState([]);
-  const [basarili, setBasarili] = useState(false);
+// ─── MASA YÖNETİMİ + ADİSYON ────────────────────────────────────────────────
+const Masalar = ({ isletmeId, kullaniciId, menu, malzemeler, setMalzemeler, setSatislar, accent }) => {
+  const [masalar, setMasalar] = useState([]);
+  const [adisyonlar, setAdisyonlar] = useState([]);
+  const [seciliMasa, setSeciliMasa] = useState(null);
+  const [adisyonEkran, setAdisyonEkran] = useState(false);
+  const [masaModal, setMasaModal] = useState(false);
+  const [yeniMasaAd, setYeniMasaAd] = useState("");
+  const [odemeModal, setOdemeModal] = useState(false);
+  const [yukleniyor, setYukleniyor] = useState(true);
 
-  const ekle = (m) => setSepet(s => {
-    const v = s.find(x => x.menuId === m.id);
-    return v ? s.map(x => x.menuId === m.id ? {...x, qty: x.qty+1} : x) : [...s, { menuId: m.id, ad: m.ad, fiyat: m.fiyat, qty: 1 }];
-  });
-  const cikar = (id) => setSepet(s => s.map(x => x.menuId===id ? {...x,qty:x.qty-1} : x).filter(x=>x.qty>0));
-  const toplam = sepet.reduce((t, x) => t + x.fiyat * x.qty, 0);
+  useEffect(() => { veriYukle(); }, []);
 
-  const satisYap = async () => {
+  const veriYukle = async () => {
+    setYukleniyor(true);
+    const [{ data: m }, { data: a }] = await Promise.all([
+      sb.from("masalar").select("*").eq("isletme_id", isletmeId).order("id"),
+      sb.from("adisyonlar").select("*").eq("isletme_id", isletmeId).eq("durum", "acik"),
+    ]);
+    setMasalar(m || []); setAdisyonlar(a || []);
+    setYukleniyor(false);
+  };
+
+  const masaEkle = async () => {
+    if (!yeniMasaAd) return;
+    const { data } = await sb.from("masalar").insert({ isletme_id: isletmeId, ad: yeniMasaAd, durum: "bos" }).select().single();
+    setMasalar(m => [...m, data]); setMasaModal(false); setYeniMasaAd("");
+  };
+
+  const masaSil = async (id) => {
+    await sb.from("masalar").delete().eq("id", id);
+    setMasalar(m => m.filter(x => x.id !== id));
+  };
+
+  const adisyonAc = async (masa) => {
+    const mevcutAdisyon = adisyonlar.find(a => a.masa_id === masa.id);
+    if (mevcutAdisyon) { setSeciliMasa({ ...masa, adisyon: mevcutAdisyon }); setAdisyonEkran(true); return; }
+    const { data } = await sb.from("adisyonlar").insert({ isletme_id: isletmeId, masa_id: masa.id, kullanici_id: kullaniciId, items: [], durum: "acik", toplam: 0 }).select().single();
+    await sb.from("masalar").update({ durum: "dolu" }).eq("id", masa.id);
+    setMasalar(m => m.map(x => x.id === masa.id ? {...x, durum: "dolu"} : x));
+    setAdisyonlar(a => [...a, data]);
+    setSeciliMasa({ ...masa, durum: "dolu", adisyon: data }); setAdisyonEkran(true);
+  };
+
+  const urunEkle = async (menuItem) => {
+    const adisyon = seciliMasa.adisyon;
+    const mevcutItems = adisyon.items || [];
+    const var_ = mevcutItems.find(x => x.menuId === menuItem.id);
+    const yeniItems = var_
+      ? mevcutItems.map(x => x.menuId === menuItem.id ? {...x, qty: x.qty+1} : x)
+      : [...mevcutItems, { menuId: menuItem.id, ad: menuItem.ad, fiyat: menuItem.fiyat, qty: 1 }];
+    const yeniToplam = yeniItems.reduce((t, x) => t + x.fiyat * x.qty, 0);
+    await sb.from("adisyonlar").update({ items: yeniItems, toplam: yeniToplam }).eq("id", adisyon.id);
+    const yeniAdisyon = { ...adisyon, items: yeniItems, toplam: yeniToplam };
+    setAdisyonlar(a => a.map(x => x.id === adisyon.id ? yeniAdisyon : x));
+    setSeciliMasa(m => ({ ...m, adisyon: yeniAdisyon }));
+  };
+
+  const urunCikar = async (menuId) => {
+    const adisyon = seciliMasa.adisyon;
+    const yeniItems = (adisyon.items||[]).map(x => x.menuId===menuId ? {...x,qty:x.qty-1} : x).filter(x=>x.qty>0);
+    const yeniToplam = yeniItems.reduce((t, x) => t + x.fiyat * x.qty, 0);
+    await sb.from("adisyonlar").update({ items: yeniItems, toplam: yeniToplam }).eq("id", adisyon.id);
+    const yeniAdisyon = { ...adisyon, items: yeniItems, toplam: yeniToplam };
+    setAdisyonlar(a => a.map(x => x.id === adisyon.id ? yeniAdisyon : x));
+    setSeciliMasa(m => ({ ...m, adisyon: yeniAdisyon }));
+  };
+
+  const hesapKapat = async (odemeTipi) => {
+    const adisyon = seciliMasa.adisyon;
+    if (!adisyon.items?.length) return;
+    // Stok düş
     const yeniMalzemeler = malzemeler.map(m => {
       let azalan = 0;
-      sepet.forEach(item => {
+      (adisyon.items||[]).forEach(item => {
         const mi = menu.find(x => x.id === item.menuId);
         const ml = (mi?.malzemeler||[]).find(x => x.id === m.id);
         if (ml) azalan += ml.qty * item.qty;
@@ -562,43 +621,128 @@ const Satis = ({ isletmeId, kullaniciId, menu, malzemeler, setMalzemeler, setSat
     });
     for (const m of yeniMalzemeler) await sb.from("malzemeler").update({ stok: m.stok }).eq("id", m.id);
     setMalzemeler(yeniMalzemeler);
-    const { data } = await sb.from("satislar").insert({ isletme_id: isletmeId, kullanici_id: kullaniciId, items: sepet, toplam, tarih: new Date().toISOString() }).select().single();
-    setSatislar(s => [...s, data]);
-    setSepet([]); setBasarili(true); setTimeout(() => setBasarili(false), 2500);
+    // Adisyonu kapat
+    await sb.from("adisyonlar").update({ durum: "kapali", kapanis_tarihi: new Date().toISOString(), odeme_tipi: odemeTipi }).eq("id", adisyon.id);
+    // Satış kaydet
+    const { data: satis } = await sb.from("satislar").insert({ isletme_id: isletmeId, kullanici_id: kullaniciId, items: adisyon.items, toplam: adisyon.toplam, tarih: new Date().toISOString(), masa: seciliMasa.ad, odeme_tipi: odemeTipi }).select().single();
+    setSatislar(s => [...s, satis]);
+    // Masayı boşalt
+    await sb.from("masalar").update({ durum: "bos" }).eq("id", seciliMasa.id);
+    setMasalar(m => m.map(x => x.id === seciliMasa.id ? {...x, durum: "bos"} : x));
+    setAdisyonlar(a => a.filter(x => x.id !== adisyon.id));
+    setOdemeModal(false); setAdisyonEkran(false); setSeciliMasa(null);
   };
 
+  const masaDurumRenk = (masa) => {
+    const adisyon = adisyonlar.find(a => a.masa_id === masa.id);
+    if (!adisyon) return { bg: C.card, border: C.border, label: "Boş", color: C.muted };
+    if (adisyon.items?.length > 0) return { bg: C.accent+"11", border: C.accent+"44", label: `₺${adisyon.toplam}`, color: C.accent };
+    return { bg: C.green+"11", border: C.green+"44", label: "Açık", color: C.green };
+  };
+
+  if (yukleniyor) return <Spinner />;
+
+  // Adisyon ekranı
+  if (adisyonEkran && seciliMasa) {
+    const adisyon = seciliMasa.adisyon;
+    const items = adisyon?.items || [];
+    const toplam = items.reduce((t, x) => t + x.fiyat * x.qty, 0);
+    return (
+      <div className="fade-in" style={{ padding: 16 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:16 }}>
+          <Btn small variant="ghost" onClick={() => { setAdisyonEkran(false); setSeciliMasa(null); }}>← Geri</Btn>
+          <span style={{ fontFamily:"Syne", fontSize:18, fontWeight:700 }}>🪑 {seciliMasa.ad}</span>
+        </div>
+
+        {/* Menü */}
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:16 }}>
+          {menu.map(m => (
+            <Card key={m.id} style={{ cursor:"pointer" }} onClick={() => urunEkle(m)}>
+              <div style={{ fontWeight:600, fontSize:14 }}>{m.ad}</div>
+              <div style={{ color: accent||C.accent, fontWeight:700, marginTop:4 }}>₺{m.fiyat}</div>
+            </Card>
+          ))}
+        </div>
+
+        {/* Adisyon */}
+        {items.length > 0 ? (
+          <Card style={{ border:`1px solid ${accent||C.accent}44` }}>
+            <div style={{ fontWeight:600, marginBottom:12, color: accent||C.accent }}>🧾 Adisyon</div>
+            {items.map(item => (
+              <div key={item.menuId} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"6px 0", borderBottom:`1px solid ${C.border}` }}>
+                <span style={{ fontSize:14 }}>{item.ad}</span>
+                <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                  <span style={{ color:C.muted, fontSize:13 }}>₺{(item.fiyat*item.qty).toFixed(0)}</span>
+                  <button onClick={() => urunCikar(item.menuId)} style={{ background:C.border,border:"none",color:C.text,borderRadius:6,width:26,height:26,cursor:"pointer" }}>−</button>
+                  <span style={{ width:20,textAlign:"center",fontWeight:600 }}>{item.qty}</span>
+                  <button onClick={() => urunEkle(menu.find(m=>m.id===item.menuId))} style={{ background:accent||C.accent,border:"none",color:"#000",borderRadius:6,width:26,height:26,cursor:"pointer" }}>+</button>
+                </div>
+              </div>
+            ))}
+            <div style={{ display:"flex", justifyContent:"space-between", marginTop:14, alignItems:"center" }}>
+              <span style={{ fontFamily:"Syne", fontSize:22, fontWeight:700 }}>₺{toplam.toFixed(0)}</span>
+              <Btn onClick={() => setOdemeModal(true)} style={{ background: accent||C.accent, color:"#000" }}>💳 Hesap Kapat</Btn>
+            </div>
+          </Card>
+        ) : (
+          <div style={{ color:C.muted, textAlign:"center", padding:40 }}>Henüz ürün eklenmedi</div>
+        )}
+
+        {odemeModal && (
+          <Modal title="Ödeme Yöntemi" onClose={() => setOdemeModal(false)}>
+            <div style={{ fontSize:14, color:C.muted, marginBottom:16 }}>Toplam: <span style={{ color:C.accent, fontWeight:700, fontSize:20 }}>₺{toplam.toFixed(0)}</span></div>
+            <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+              <Btn onClick={() => hesapKapat("nakit")} variant="success">💵 Nakit</Btn>
+              <Btn onClick={() => hesapKapat("kart")} variant="ghost">💳 Kredi/Banka Kartı</Btn>
+              <Btn onClick={() => hesapKapat("havale")} variant="ghost">📱 Havale/QR</Btn>
+            </div>
+          </Modal>
+        )}
+      </div>
+    );
+  }
+
+  // Masa listesi
   return (
     <div className="fade-in" style={{ padding: 16 }}>
-      <div style={{ fontFamily: "Syne", fontSize: 20, fontWeight: 700, marginBottom: 16 }}>Satış Yap</div>
-      {basarili && <div style={{ background: C.green+"22", border:`1px solid ${C.green}44`, color: C.green, borderRadius:12, padding:"12px 16px", marginBottom:14, fontWeight:600 }}>✅ Satış kaydedildi!</div>}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
-        {menu.map(m => (
-          <Card key={m.id} style={{ cursor:"pointer" }} onClick={() => ekle(m)}>
-            <div style={{ fontWeight: 600, fontSize: 14 }}>{m.ad}</div>
-            <div style={{ color: C.accent, fontWeight: 700, marginTop: 4 }}>₺{m.fiyat}</div>
-          </Card>
-        ))}
-        {menu.length === 0 && <div style={{ color: C.muted, gridColumn:"1/-1", textAlign:"center", padding:40 }}>Önce menü ekle</div>}
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+        <span style={{ fontFamily:"Syne", fontSize:20, fontWeight:700 }}>Masalar</span>
+        <Btn small onClick={() => setMasaModal(true)}>+ Masa Ekle</Btn>
       </div>
-      {sepet.length > 0 && (
-        <Card style={{ border: `1px solid ${C.accent}44` }}>
-          <div style={{ fontWeight: 600, marginBottom: 12, color: C.accent }}>🛒 Sepet</div>
-          {sepet.map(item => (
-            <div key={item.menuId} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"6px 0", borderBottom:`1px solid ${C.border}` }}>
-              <span style={{ fontSize: 14 }}>{item.ad}</span>
-              <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                <span style={{ color: C.muted, fontSize: 13 }}>₺{(item.fiyat*item.qty).toFixed(0)}</span>
-                <button onClick={() => cikar(item.menuId)} style={{ background:C.border,border:"none",color:C.text,borderRadius:6,width:26,height:26,cursor:"pointer" }}>−</button>
-                <span style={{ width:20,textAlign:"center",fontWeight:600 }}>{item.qty}</span>
-                <button onClick={() => ekle(menu.find(m=>m.id===item.menuId))} style={{ background:C.accent,border:"none",color:"#000",borderRadius:6,width:26,height:26,cursor:"pointer" }}>+</button>
-              </div>
+
+      {/* Özet */}
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10, marginBottom:16 }}>
+        <Card><div style={{ fontSize:20, fontWeight:700, color:C.green }}>{masalar.filter(m=>!adisyonlar.find(a=>a.masa_id===m.id)).length}</div><div style={{ fontSize:11, color:C.muted }}>Boş</div></Card>
+        <Card><div style={{ fontSize:20, fontWeight:700, color:accent||C.accent }}>{adisyonlar.length}</div><div style={{ fontSize:11, color:C.muted }}>Dolu</div></Card>
+        <Card><div style={{ fontSize:20, fontWeight:700, color:C.text }}>₺{adisyonlar.reduce((t,a)=>t+(a.toplam||0),0).toFixed(0)}</div><div style={{ fontSize:11, color:C.muted }}>Açık</div></Card>
+      </div>
+
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+        {masalar.map(masa => {
+          const durum = masaDurumRenk(masa);
+          return (
+            <div key={masa.id} onClick={() => adisyonAc(masa)}
+              style={{ background: durum.bg, border:`2px solid ${durum.border}`, borderRadius:16, padding:16, cursor:"pointer", transition:"all 0.2s" }}>
+              <div style={{ fontFamily:"Syne", fontSize:16, fontWeight:700 }}>{masa.ad}</div>
+              <div style={{ fontSize:13, color:durum.color, marginTop:4, fontWeight:600 }}>{durum.label}</div>
+              <div style={{ fontSize:11, color:C.muted, marginTop:2 }}>{masa.kapasite} kişilik</div>
             </div>
-          ))}
-          <div style={{ display:"flex", justifyContent:"space-between", marginTop:14, alignItems:"center" }}>
-            <span style={{ fontFamily:"Syne", fontSize:20, fontWeight:700 }}>₺{toplam.toFixed(0)}</span>
-            <Btn onClick={satisYap}>Satışı Kaydet</Btn>
-          </div>
-        </Card>
+          );
+        })}
+      </div>
+
+      {masalar.length === 0 && (
+        <div style={{ color:C.muted, textAlign:"center", padding:40 }}>
+          <div style={{ fontSize:40, marginBottom:8 }}>🪑</div>
+          Henüz masa yok, ekle!
+        </div>
+      )}
+
+      {masaModal && (
+        <Modal title="Yeni Masa Ekle" onClose={() => setMasaModal(false)}>
+          <input placeholder="Masa adı (örn: Masa 1, Teras 2...)" value={yeniMasaAd} onChange={e => setYeniMasaAd(e.target.value)} style={{ marginBottom:12 }} />
+          <Btn onClick={masaEkle}>Ekle</Btn>
+        </Modal>
       )}
     </div>
   );
@@ -847,9 +991,9 @@ function App() {
 
   const nav = [
     { id: "dashboard", icon: "📊", label: "Özet" },
+    { id: "masalar", icon: "🪑", label: "Masalar" },
     { id: "malzemeler", icon: "📦", label: "Stok", badge: dusukStok },
     ...(mudur ? [{ id: "menu", icon: "🍔", label: "Menü" }] : []),
-    { id: "satis", icon: "💳", label: "Satış" },
     ...(mudur ? [{ id: "raporlar", icon: "📈", label: "Raporlar" }] : []),
     { id: "ayarlar", icon: "⚙️", label: "Ayarlar" },
   ];
@@ -862,9 +1006,9 @@ function App() {
         </div>
       )}
       {sayfa === "dashboard" && <Dashboard isletme={isletme} malzemeler={malzemeler} menu={menu} satislar={satislar} />}
+      {sayfa === "masalar" && <Masalar isletmeId={kullanici.isletme_id} kullaniciId={kullanici.id} menu={menu} malzemeler={malzemeler} setMalzemeler={setMalzemeler} setSatislar={setSatislar} accent={accent} />}
       {sayfa === "malzemeler" && <Malzemeler isletmeId={kullanici.isletme_id} malzemeler={malzemeler} setMalzemeler={setMalzemeler} cevrimici={cevrimici} />}
       {sayfa === "menu" && mudur && <Menu isletmeId={kullanici.isletme_id} menu={menu} setMenu={setMenu} malzemeler={malzemeler} />}
-      {sayfa === "satis" && <Satis isletmeId={kullanici.isletme_id} kullaniciId={kullanici.id} menu={menu} malzemeler={malzemeler} setMalzemeler={setMalzemeler} setSatislar={setSatislar} />}
       {sayfa === "raporlar" && mudur && <Raporlar satislar={satislar} menu={menu} malzemeler={malzemeler} isletme={isletme} />}
       {sayfa === "ayarlar" && <Ayarlar kullanici={kullanici} setKullanici={setKullanici} />}
       <div style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:540, background:C.surface, borderTop:`1px solid ${C.border}`, display:"flex", padding:"8px 0 12px" }}>
