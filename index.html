@@ -149,13 +149,44 @@ const GirisEkrani = ({ onGiris }) => {
   );
 };
 
-const Ayarlar = ({ kullanici, tema, setTema }) => {
+const Ayarlar = ({ kullanici, tema, setTema, isletmeId, setSatislar }) => {
   const [isletme, setIsletme] = useState(kullanici.isletmeler);
   const [kayit, setKayit] = useState(false);
   const [yeniK, setYeniK] = useState({ email: "", sifre: "", rol: "kasiyer" });
   const [mesaj, setMesaj] = useState("");
   const [logoYukleniyor, setLogoYukleniyor] = useState(false);
+  const [kullanicilar, setKullanicilar] = useState([]);
+  const [kullanicilariGoster, setKullanicilariGoster] = useState(false);
   const fileRef = useRef();
+
+  useEffect(() => {
+    if (kullanici.rol === "mudur") {
+      kullanicilariYukle();
+    }
+  }, []);
+
+  const kullanicilariYukle = async () => {
+    const { data } = await sb.from("kullanicilar").select("*").eq("isletme_id", isletme.id);
+    setKullanicilar(data || []);
+  };
+
+  const kullaniciSil = async (hedefKullanici) => {
+    if (hedefKullanici.id === kullanici.id) {
+      setMesaj("Kendinizi silemezsiniz.");
+      setTimeout(() => setMesaj(""), 3000);
+      return;
+    }
+    if (!window.confirm(`${hedefKullanici.email} adlı kullanıcıyı silmek istediğinize emin misiniz?`)) return;
+    try {
+      const { error } = await sb.from("kullanicilar").delete().eq("id", hedefKullanici.id);
+      if (error) throw error;
+      setKullanicilar(k => k.filter(x => x.id !== hedefKullanici.id));
+      setMesaj("Kullanici silindi!");
+      setTimeout(() => setMesaj(""), 2000);
+    } catch (e) {
+      setMesaj("Hata: " + e.message);
+    }
+  };
 
   const isletmeGuncelle = async () => {
     const { error } = await sb.from("isletmeler").update({ ad: isletme.ad, renk: isletme.renk }).eq("id", isletme.id);
@@ -183,6 +214,7 @@ const Ayarlar = ({ kullanici, tema, setTema }) => {
       if (error) throw error;
       await sb.from("kullanicilar").insert({ id: data.user.id, isletme_id: isletme.id, email: yeniK.email, rol: yeniK.rol });
       setMesaj("Kullanici eklendi!"); setYeniK({ email: "", sifre: "", rol: "kasiyer" }); setKayit(false);
+      await kullanicilariYukle();
       setTimeout(() => setMesaj(""), 2000);
     } catch (e) { setMesaj("Hata: " + e.message); }
   };
@@ -192,7 +224,7 @@ const Ayarlar = ({ kullanici, tema, setTema }) => {
   return (
     <div className="fade-in" style={{ padding: 16 }}>
       <div style={{ fontFamily: "Syne", fontSize: 20, fontWeight: 700, marginBottom: 16 }}>Ayarlar</div>
-      {mesaj && <div style={{ color: C.green, marginBottom: 12, fontSize: 14 }}>{mesaj}</div>}
+      {mesaj && <div style={{ color: mesaj.startsWith("Hata") || mesaj.startsWith("Kendinizi") ? C.red : C.green, marginBottom: 12, fontSize: 14 }}>{mesaj}</div>}
 
       <Card style={{ marginBottom: 12 }}>
         <div style={{ fontWeight: 600, marginBottom: 12, color: C.muted, fontSize: 13 }}>GORUNUM</div>
@@ -235,9 +267,38 @@ const Ayarlar = ({ kullanici, tema, setTema }) => {
       {kullanici.rol === "mudur" && (
         <Card style={{ marginBottom: 12 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-            <div style={{ fontWeight: 600, color: C.muted, fontSize: 13 }}>KULLANICI EKLE</div>
-            <Btn small variant="ghost" onClick={() => setKayit(!kayit)}>{kayit ? "Iptal" : "+ Ekle"}</Btn>
+            <div style={{ fontWeight: 600, color: C.muted, fontSize: 13 }}>KULLANICI YONETIMI</div>
+            <div style={{ display:"flex", gap:8 }}>
+              <Btn small variant="ghost" onClick={() => { setKullanicilariGoster(!kullanicilariGoster); setKayit(false); }}>
+                {kullanicilariGoster ? "Gizle" : "Listele"}
+              </Btn>
+              <Btn small onClick={() => { setKayit(!kayit); setKullanicilariGoster(false); }}>{kayit ? "Iptal" : "+ Ekle"}</Btn>
+            </div>
           </div>
+
+          {/* Kullanici listesi */}
+          {kullanicilariGoster && (
+            <div style={{ marginBottom: kayit ? 12 : 0 }}>
+              {kullanicilar.map(k => (
+                <div key={k.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 0", borderBottom:`1px solid ${C.border}` }}>
+                  <div>
+                    <div style={{ fontSize:14, fontWeight:600 }}>{k.email}</div>
+                    <Badge color={k.rol === "mudur" ? C.accent : C.green}>{k.rol === "mudur" ? "Mudur" : "Kasiyer"}</Badge>
+                  </div>
+                  {k.id !== kullanici.id ? (
+                    <Btn small variant="danger" onClick={() => kullaniciSil(k)}>Sil</Btn>
+                  ) : (
+                    <span style={{ fontSize:12, color:C.muted, fontStyle:"italic" }}>Sen</span>
+                  )}
+                </div>
+              ))}
+              {kullanicilar.length === 0 && (
+                <div style={{ color:C.muted, textAlign:"center", padding:16, fontSize:13 }}>Kullanici bulunamadi</div>
+              )}
+            </div>
+          )}
+
+          {/* Yeni kullanici ekleme formu */}
           {kayit && (
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               <input placeholder="E-posta" value={yeniK.email} onChange={e => setYeniK({...yeniK, email: e.target.value})} />
@@ -249,6 +310,22 @@ const Ayarlar = ({ kullanici, tema, setTema }) => {
               <Btn onClick={kasiyerEkle}>Kullanici Ekle</Btn>
             </div>
           )}
+        </Card>
+      )}
+
+      {kullanici.rol === "mudur" && (
+        <Card style={{ marginBottom: 12, border: `1px solid ${C.red}44` }}>
+          <div style={{ fontWeight: 600, color: C.muted, fontSize: 13, marginBottom: 8 }}>TEST / GELİSTİRME</div>
+          <div style={{ fontSize: 13, color: C.muted, marginBottom: 12 }}>
+            Deneme sirasinda olusturulan satis kayitlarini siler. Geri alinamaz!
+          </div>
+          <Btn variant="danger" onClick={async () => {
+            if (!window.confirm("TUM satis kayitlarini silmek istediginize emin misiniz? Bu islem geri alinamaz!")) return;
+            await sb.from("satislar").delete().eq("isletme_id", isletmeId);
+            setSatislar([]);
+            setMesaj("Tum satis kayitlari silindi!");
+            setTimeout(() => setMesaj(""), 3000);
+          }}>🗑️ Tum Satis Kayitlarini Sifirla</Btn>
         </Card>
       )}
 
@@ -264,13 +341,40 @@ const Ayarlar = ({ kullanici, tema, setTema }) => {
   );
 };
 
-const Dashboard = ({ isletme, malzemeler, menu, satislar }) => {
+const Dashboard = ({ isletme, malzemeler, menu, satislar, masraflar }) => {
   const accent = isletme?.renk || C.accent;
   const dusukStok = malzemeler.filter(m => m.stok <= m.min_stok);
-  const bugun = new Date().toDateString();
-  const bugunSatis = satislar.filter(s => new Date(s.tarih).toDateString() === bugun);
+  const simdi = new Date();
+
+  // Gunluk - bugun gece yarısından itibaren
+  const bugunBaslangic = new Date(simdi); bugunBaslangic.setHours(0,0,0,0);
+  const bugunSatis = satislar.filter(s => new Date(s.tarih) >= bugunBaslangic && (!s.tip || s.tip !== "zayi"));
   const bugunCiro = bugunSatis.reduce((t, s) => t + s.toplam, 0);
-  const toplamSatis = satislar.reduce((t, s) => t + s.toplam, 0);
+
+  // Haftalık - bu haftanın Pazartesi'sinden itibaren
+  const haftaBaslangic = new Date(simdi);
+  const gun = haftaBaslangic.getDay();
+  const fark = (gun === 0 ? -6 : 1 - gun);
+  haftaBaslangic.setDate(haftaBaslangic.getDate() + fark);
+  haftaBaslangic.setHours(0,0,0,0);
+  const haftaSatis = satislar.filter(s => new Date(s.tarih) >= haftaBaslangic && (!s.tip || s.tip !== "zayi"));
+  const haftaCiro = haftaSatis.reduce((t, s) => t + s.toplam, 0);
+
+  // Aylık - bu ayın 1'inden itibaren
+  const ayBaslangic = new Date(simdi.getFullYear(), simdi.getMonth(), 1, 0, 0, 0, 0);
+  const aySatis = satislar.filter(s => new Date(s.tarih) >= ayBaslangic && (!s.tip || s.tip !== "zayi"));
+  const ayCiro = aySatis.reduce((t, s) => t + s.toplam, 0);
+
+  // Masraflar
+  const bugunMasraf = (masraflar||[]).filter(m => new Date(m.tarih) >= bugunBaslangic).reduce((t,m) => t+m.tutar, 0);
+  const haftaMasraf = (masraflar||[]).filter(m => new Date(m.tarih) >= haftaBaslangic).reduce((t,m) => t+m.tutar, 0);
+  const ayMasraf = (masraflar||[]).filter(m => new Date(m.tarih) >= ayBaslangic).reduce((t,m) => t+m.tutar, 0);
+
+  const [donem, setDonem] = useState("bugun");
+  const ciro = donem === "bugun" ? bugunCiro : donem === "hafta" ? haftaCiro : ayCiro;
+  const masraf = donem === "bugun" ? bugunMasraf : donem === "hafta" ? haftaMasraf : ayMasraf;
+  const satisSayisi = donem === "bugun" ? bugunSatis.length : donem === "hafta" ? haftaSatis.length : aySatis.length;
+  const donemLabel = donem === "bugun" ? "Bugun" : donem === "hafta" ? "Bu Hafta" : "Bu Ay";
 
   return (
     <div className="fade-in" style={{ padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
@@ -282,20 +386,51 @@ const Dashboard = ({ isletme, malzemeler, menu, satislar }) => {
           🍔 {isletme ? isletme.ad : "BurgerStock"}
         </div>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-        {[
-          { label: "Bugun Ciro", val: "₺" + bugunCiro.toLocaleString(), color: C.green, icon: "📈" },
-          { label: "Bugun Satis", val: bugunSatis.length + " siparis", color: accent, icon: "🧾" },
-          { label: "Toplam Ciro", val: "₺" + toplamSatis.toLocaleString(), color: C.text, icon: "💰" },
-          { label: "Dusuk Stok", val: dusukStok.length + " urun", color: dusukStok.length > 0 ? C.red : C.green, icon: "⚠️" },
-        ].map(s => (
-          <Card key={s.label}>
-            <div style={{ fontSize: 20 }}>{s.icon}</div>
-            <div style={{ fontSize: 22, fontWeight: 700, color: s.color, marginTop: 4 }}>{s.val}</div>
-            <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>{s.label}</div>
-          </Card>
+
+      {/* Dönem seçici */}
+      <div style={{ display:"flex", gap:8 }}>
+        {[["bugun","Bugun"],["hafta","Bu Hafta"],["ay","Bu Ay"]].map(([k,l]) => (
+          <button key={k} onClick={() => setDonem(k)}
+            style={{ flex:1, background: donem===k ? accent : C.card, color: donem===k ? "#000":"#fff", border:"1px solid " + (donem===k?accent:C.border), borderRadius:20, padding:"7px 0", fontSize:12, cursor:"pointer", fontWeight: donem===k?700:400 }}>
+            {l}
+          </button>
         ))}
       </div>
+
+      {/* Ana ciro kartı */}
+      <Card style={{ background: accent + "15", border: `1px solid ${accent}44` }}>
+        <div style={{ fontSize:13, color:C.muted, marginBottom:4 }}>{donemLabel} Ciro</div>
+        <div style={{ fontFamily:"Syne", fontSize:34, fontWeight:800, color:accent }}>₺{ciro.toLocaleString()}</div>
+        <div style={{ display:"flex", gap:16, marginTop:8 }}>
+          <div><span style={{ color:C.muted, fontSize:12 }}>Satis: </span><span style={{ fontWeight:600, fontSize:13 }}>{satisSayisi} adet</span></div>
+          <div><span style={{ color:C.muted, fontSize:12 }}>Masraf: </span><span style={{ fontWeight:600, fontSize:13, color:C.red }}>-₺{masraf.toLocaleString()}</span></div>
+          <div><span style={{ color:C.muted, fontSize:12 }}>Net: </span><span style={{ fontWeight:700, fontSize:13, color: (ciro-masraf)>=0 ? C.green : C.red }}>₺{(ciro-masraf).toLocaleString()}</span></div>
+        </div>
+      </Card>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <Card>
+          <div style={{ fontSize: 18 }}>📊</div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: C.green, marginTop: 4 }}>₺{bugunCiro.toLocaleString()}</div>
+          <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>Bugun Ciro</div>
+        </Card>
+        <Card>
+          <div style={{ fontSize: 18 }}>📅</div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: accent, marginTop: 4 }}>₺{ayCiro.toLocaleString()}</div>
+          <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>Aylik Ciro</div>
+        </Card>
+        <Card>
+          <div style={{ fontSize: 18 }}>💸</div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: C.red, marginTop: 4 }}>₺{ayMasraf.toLocaleString()}</div>
+          <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>Aylik Masraf</div>
+        </Card>
+        <Card>
+          <div style={{ fontSize: 18 }}>⚠️</div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: dusukStok.length > 0 ? C.red : C.green, marginTop: 4 }}>{dusukStok.length} urun</div>
+          <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>Dusuk Stok</div>
+        </Card>
+      </div>
+
       {dusukStok.length > 0 && (
         <Card style={{ border: `1px solid ${C.red}44`, background: C.red + "0a" }}>
           <div style={{ color: C.red, fontWeight: 600, marginBottom: 10 }}>🔴 Dusuk Stok Uyarisi</div>
@@ -929,6 +1064,121 @@ const Masalar = ({ isletmeId, kullaniciId, menu, malzemeler, setMalzemeler, setS
   );
 };
 
+const Masraflar = ({ isletmeId, masraflar, setMasraflar }) => {
+  const [modal, setModal] = useState(false);
+  const [form, setForm] = useState({ baslik: "", tutar: "", kategori: "genel", aciklama: "" });
+  const [filtre, setFiltre] = useState("ay");
+  const simdi = new Date();
+
+  const kategoriler = ["genel","kira","personel","malzeme","elektrik","su","diger"];
+
+  const kaydet = async () => {
+    if (!form.baslik || !form.tutar) return;
+    const { data } = await sb.from("masraflar").insert({
+      isletme_id: isletmeId,
+      baslik: form.baslik,
+      tutar: +form.tutar,
+      kategori: form.kategori,
+      aciklama: form.aciklama,
+      tarih: new Date().toISOString(),
+    }).select().single();
+    setMasraflar(m => [data, ...m]);
+    setForm({ baslik:"", tutar:"", kategori:"genel", aciklama:"" });
+    setModal(false);
+  };
+
+  const sil = async (id) => {
+    if (!window.confirm("Bu masrafi silmek istediginize emin misiniz?")) return;
+    await sb.from("masraflar").delete().eq("id", id);
+    setMasraflar(m => m.filter(x => x.id !== id));
+  };
+
+  const bugunBaslangic = new Date(simdi); bugunBaslangic.setHours(0,0,0,0);
+  const haftaBaslangic = new Date(simdi);
+  const hg = haftaBaslangic.getDay();
+  haftaBaslangic.setDate(haftaBaslangic.getDate() + (hg===0?-6:1-hg));
+  haftaBaslangic.setHours(0,0,0,0);
+  const ayBaslangic = new Date(simdi.getFullYear(), simdi.getMonth(), 1);
+
+  const filtreUygula = (m) => {
+    const t = new Date(m.tarih);
+    if (filtre === "bugun") return t >= bugunBaslangic;
+    if (filtre === "hafta") return t >= haftaBaslangic;
+    if (filtre === "ay") return t >= ayBaslangic;
+    return true;
+  };
+
+  const gosterilen = masraflar.filter(filtreUygula);
+  const toplam = gosterilen.reduce((t, m) => t + m.tutar, 0);
+
+  const katRenk = { genel:C.muted, kira:C.accent, personel:"#7b68ee", malzeme:C.green, elektrik:"#e8c830", su:"#30c8e8", diger:C.red };
+
+  return (
+    <div className="fade-in" style={{ padding:16 }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
+        <span style={{ fontFamily:"Syne", fontSize:20, fontWeight:700 }}>Masraflar</span>
+        <Btn small onClick={() => setModal(true)}>+ Masraf Ekle</Btn>
+      </div>
+
+      <div style={{ display:"flex", gap:8, marginBottom:14 }}>
+        {[["bugun","Bugun"],["hafta","Bu Hafta"],["ay","Bu Ay"],["tum","Tumu"]].map(([k,l]) => (
+          <button key={k} onClick={() => setFiltre(k)}
+            style={{ background: filtre===k ? C.accent : C.card, color: filtre===k ? "#000":"#fff", border:"1px solid "+(filtre===k?C.accent:C.border), borderRadius:20, padding:"6px 12px", fontSize:12, cursor:"pointer" }}>
+            {l}
+          </button>
+        ))}
+      </div>
+
+      <Card style={{ marginBottom:14, background: C.red+"0a", border:`1px solid ${C.red}44` }}>
+        <div style={{ fontSize:12, color:C.muted }}>Toplam Masraf</div>
+        <div style={{ fontFamily:"Syne", fontSize:28, fontWeight:800, color:C.red }}>₺{toplam.toLocaleString()}</div>
+        <div style={{ fontSize:12, color:C.muted, marginTop:4 }}>{gosterilen.length} kayit</div>
+      </Card>
+
+      <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+        {gosterilen.map(m => (
+          <Card key={m.id}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+              <div style={{ flex:1 }}>
+                <div style={{ fontWeight:600, fontSize:15 }}>{m.baslik}</div>
+                <div style={{ display:"flex", gap:8, marginTop:4, alignItems:"center" }}>
+                  <Badge color={katRenk[m.kategori]||C.muted}>{m.kategori}</Badge>
+                  <span style={{ fontSize:12, color:C.muted }}>{new Date(m.tarih).toLocaleDateString("tr-TR")}</span>
+                </div>
+                {m.aciklama && <div style={{ fontSize:12, color:C.muted, marginTop:4 }}>{m.aciklama}</div>}
+              </div>
+              <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                <span style={{ fontFamily:"Syne", fontSize:18, fontWeight:700, color:C.red }}>₺{m.tutar.toLocaleString()}</span>
+                <Btn small variant="danger" onClick={() => sil(m.id)}>Sil</Btn>
+              </div>
+            </div>
+          </Card>
+        ))}
+        {gosterilen.length === 0 && (
+          <div style={{ color:C.muted, textAlign:"center", padding:40 }}>
+            <div style={{ fontSize:36, marginBottom:8 }}>💸</div>
+            Bu donemde masraf yok
+          </div>
+        )}
+      </div>
+
+      {modal && (
+        <Modal title="Yeni Masraf" onClose={() => setModal(false)}>
+          <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+            <input placeholder="Masraf basligi (ornek: Ekmek faturasi)" value={form.baslik} onChange={e => setForm({...form, baslik:e.target.value})} />
+            <input type="number" placeholder="Tutar (₺)" value={form.tutar} onChange={e => setForm({...form, tutar:e.target.value})} />
+            <select value={form.kategori} onChange={e => setForm({...form, kategori:e.target.value})}>
+              {kategoriler.map(k => <option key={k} value={k}>{k.charAt(0).toUpperCase()+k.slice(1)}</option>)}
+            </select>
+            <input placeholder="Aciklama (istege bagli)" value={form.aciklama} onChange={e => setForm({...form, aciklama:e.target.value})} />
+            <Btn onClick={kaydet}>Kaydet</Btn>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+};
+
 const Raporlar = ({ satislar, menu, malzemeler, isletme }) => {
   const [sekme, setSekme] = useState("satis");
   const [filtre, setFiltre] = useState("bugun");
@@ -1042,6 +1292,7 @@ function App() {
   const [menu, setMenu] = useState([]);
   const [satislar, setSatislar] = useState([]);
   const [kategoriler, setKategoriler] = useState([]);
+  const [masraflar, setMasraflar] = useState([]);
   const [tema, setTema] = useState(function() { return localStorage.getItem("tema") || "dark"; });
   const [cevrimici, setCevrimici] = useState(navigator.onLine);
 
@@ -1093,13 +1344,14 @@ function App() {
 
   const veriYukle = async (isletmeId) => {
     try {
-      const [r1, r2, r3, r4] = await Promise.all([
+      const [r1, r2, r3, r4, r5] = await Promise.all([
         sb.from("malzemeler").select("*").eq("isletme_id", isletmeId),
         sb.from("menu").select("*").eq("isletme_id", isletmeId),
-        sb.from("satislar").select("*").eq("isletme_id", isletmeId).order("tarih", { ascending: false }).limit(100),
+        sb.from("satislar").select("*").eq("isletme_id", isletmeId).order("tarih", { ascending: false }).limit(200),
         sb.from("kategoriler").select("*").eq("isletme_id", isletmeId).order("sira"),
+        sb.from("masraflar").select("*").eq("isletme_id", isletmeId).order("tarih", { ascending: false }).limit(200),
       ]);
-      setMalzemeler(r1.data || []); setMenu(r2.data || []); setSatislar(r3.data || []); setKategoriler(r4.data || []);
+      setMalzemeler(r1.data || []); setMenu(r2.data || []); setSatislar(r3.data || []); setKategoriler(r4.data || []); setMasraflar(r5.data || []);
       localCache.set("malzemeler_" + isletmeId, r1.data || []);
       localCache.set("menu_" + isletmeId, r2.data || []);
       localCache.set("satislar_" + isletmeId, r3.data || []);
@@ -1135,6 +1387,7 @@ function App() {
   ];
   if (mudur) nav.push({ id: "menu", icon: "🍔", label: "Menu" });
   if (mudur) nav.push({ id: "mutfak", icon: "👨‍🍳", label: "Mutfak" });
+  if (mudur) nav.push({ id: "masraflar", icon: "💸", label: "Masraf" });
   if (mudur) nav.push({ id: "qrmenu", icon: "📱", label: "QR" });
   if (mudur) nav.push({ id: "raporlar", icon: "📈", label: "Rapor" });
   nav.push({ id: "ayarlar", icon: "⚙️", label: "Ayarlar" });
@@ -1146,14 +1399,15 @@ function App() {
           Cevrimdisi - son kaydedilen veriler gosteriliyor
         </div>
       )}
-      {sayfa === "dashboard" && <Dashboard isletme={isletme} malzemeler={malzemeler} menu={menu} satislar={satislar} />}
+      {sayfa === "dashboard" && <Dashboard isletme={isletme} malzemeler={malzemeler} menu={menu} satislar={satislar} masraflar={masraflar} />}
       {sayfa === "masalar" && <Masalar isletmeId={kullanici.isletme_id} kullaniciId={kullanici.id} menu={menu} malzemeler={malzemeler} setMalzemeler={setMalzemeler} setSatislar={setSatislar} accent={accent} kategoriler={kategoriler} />}
       {sayfa === "malzemeler" && <Malzemeler isletmeId={kullanici.isletme_id} malzemeler={malzemeler} setMalzemeler={setMalzemeler} cevrimici={cevrimici} />}
       {sayfa === "menu" && mudur && <MenuSayfasi isletmeId={kullanici.isletme_id} menu={menu} setMenu={setMenu} malzemeler={malzemeler} kategoriler={kategoriler} setKategoriler={setKategoriler} />}
       {sayfa === "mutfak" && mudur && <MutfakEkrani isletmeId={kullanici.isletme_id} />}
+      {sayfa === "masraflar" && mudur && <Masraflar isletmeId={kullanici.isletme_id} masraflar={masraflar} setMasraflar={setMasraflar} />}
       {sayfa === "qrmenu" && mudur && <QRMenu isletme={isletme} menu={menu} kategoriler={kategoriler} />}
       {sayfa === "raporlar" && mudur && <Raporlar satislar={satislar} menu={menu} malzemeler={malzemeler} isletme={isletme} />}
-      {sayfa === "ayarlar" && <Ayarlar kullanici={kullanici} tema={tema} setTema={setTema} />}
+      {sayfa === "ayarlar" && <Ayarlar kullanici={kullanici} tema={tema} setTema={setTema} isletmeId={kullanici.isletme_id} setSatislar={setSatislar} />}
       <div style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:540, background: tema==="light" ? "#ffffff" : C.surface, borderTop:"1px solid " + (tema==="light"?"#e0ddd8":C.border), display:"flex", padding:"8px 0 12px" }}>
         {nav.map(n => (
           <button key={n.id} onClick={() => setSayfa(n.id)}
