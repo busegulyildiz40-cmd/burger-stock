@@ -1305,6 +1305,123 @@ const Raporlar = ({ satislar, menu, malzemeler, isletme }) => {
 };
 
 
+
+const Masraflar = ({ isletmeId, masraflar, setMasraflar }) => {
+  const [modal, setModal] = useState(false);
+  const [form, setForm] = useState({ baslik: "", tutar: "", kategori: "genel", aciklama: "" });
+  const [filtre, setFiltre] = useState("ay");
+  const simdi = new Date();
+
+  const kategoriler = ["genel","kira","personel","malzeme","elektrik","su","diger"];
+
+  const kaydet = async () => {
+    if (!form.baslik || !form.tutar) return;
+    const { data, error } = await sb.from("masraflar").insert({
+      isletme_id: isletmeId,
+      baslik: form.baslik,
+      tutar: +form.tutar,
+      kategori: form.kategori,
+      aciklama: form.aciklama,
+      tarih: new Date().toISOString(),
+    }).select().single();
+    if (error) { alert("Hata: " + error.message); return; }
+    setMasraflar(m => [data, ...m]);
+    setForm({ baslik:"", tutar:"", kategori:"genel", aciklama:"" });
+    setModal(false);
+  };
+
+  const sil = async (id) => {
+    if (!window.confirm("Bu masrafi silmek istediginize emin misiniz?")) return;
+    await sb.from("masraflar").delete().eq("id", id);
+    setMasraflar(m => m.filter(x => x.id !== id));
+  };
+
+  const bugunBaslangic = new Date(simdi); bugunBaslangic.setHours(0,0,0,0);
+  const haftaBaslangic = new Date(simdi);
+  const hg = haftaBaslangic.getDay();
+  haftaBaslangic.setDate(haftaBaslangic.getDate() + (hg===0?-6:1-hg));
+  haftaBaslangic.setHours(0,0,0,0);
+  const ayBaslangic = new Date(simdi.getFullYear(), simdi.getMonth(), 1);
+
+  const filtreUygula = (m) => {
+    const t = new Date(m.tarih);
+    if (filtre === "bugun") return t >= bugunBaslangic;
+    if (filtre === "hafta") return t >= haftaBaslangic;
+    if (filtre === "ay") return t >= ayBaslangic;
+    return true;
+  };
+
+  const gosterilen = (masraflar||[]).filter(filtreUygula);
+  const toplam = gosterilen.reduce((t, m) => t + (+m.tutar||0), 0);
+
+  const katRenk = { genel:C.muted, kira:C.accent, personel:"#7b68ee", malzeme:C.green, elektrik:"#e8c830", su:"#30c8e8", diger:C.red };
+
+  return (
+    <div className="fade-in" style={{ padding:16 }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
+        <span style={{ fontFamily:"Syne", fontSize:20, fontWeight:700 }}>Masraflar</span>
+        <Btn small onClick={() => setModal(true)}>+ Masraf Ekle</Btn>
+      </div>
+
+      <div style={{ display:"flex", gap:8, marginBottom:14 }}>
+        {[["bugun","Bugun"],["hafta","Bu Hafta"],["ay","Bu Ay"],["tum","Tumu"]].map(([k,l]) => (
+          <button key={k} onClick={() => setFiltre(k)}
+            style={{ background: filtre===k ? C.accent : C.card, color: filtre===k ? "#000":"#fff", border:"1px solid "+(filtre===k?C.accent:C.border), borderRadius:20, padding:"6px 12px", fontSize:12, cursor:"pointer" }}>
+            {l}
+          </button>
+        ))}
+      </div>
+
+      <Card style={{ marginBottom:14, background: C.red+"0a", border:"1px solid "+C.red+"44" }}>
+        <div style={{ fontSize:12, color:C.muted }}>Toplam Masraf</div>
+        <div style={{ fontFamily:"Syne", fontSize:28, fontWeight:800, color:C.red }}>₺{toplam.toLocaleString()}</div>
+        <div style={{ fontSize:12, color:C.muted, marginTop:4 }}>{gosterilen.length} kayit</div>
+      </Card>
+
+      <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+        {gosterilen.map(m => (
+          <Card key={m.id}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+              <div style={{ flex:1 }}>
+                <div style={{ fontWeight:600, fontSize:15 }}>{m.baslik}</div>
+                <div style={{ display:"flex", gap:8, marginTop:4, alignItems:"center" }}>
+                  <Badge color={katRenk[m.kategori]||C.muted}>{m.kategori}</Badge>
+                  <span style={{ fontSize:12, color:C.muted }}>{new Date(m.tarih).toLocaleDateString("tr-TR")}</span>
+                </div>
+                {m.aciklama && <div style={{ fontSize:12, color:C.muted, marginTop:4 }}>{m.aciklama}</div>}
+              </div>
+              <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                <span style={{ fontFamily:"Syne", fontSize:18, fontWeight:700, color:C.red }}>₺{(+m.tutar).toLocaleString()}</span>
+                <Btn small variant="danger" onClick={() => sil(m.id)}>Sil</Btn>
+              </div>
+            </div>
+          </Card>
+        ))}
+        {gosterilen.length === 0 && (
+          <div style={{ color:C.muted, textAlign:"center", padding:40 }}>
+            <div style={{ fontSize:36, marginBottom:8 }}>💸</div>
+            Bu donemde masraf yok
+          </div>
+        )}
+      </div>
+
+      {modal && (
+        <Modal title="Yeni Masraf" onClose={() => setModal(false)}>
+          <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+            <input placeholder="Masraf basligi (ornek: Ekmek faturasi)" value={form.baslik} onChange={e => setForm({...form, baslik:e.target.value})} />
+            <input type="number" placeholder="Tutar (₺)" value={form.tutar} onChange={e => setForm({...form, tutar:e.target.value})} />
+            <select value={form.kategori} onChange={e => setForm({...form, kategori:e.target.value})}>
+              {kategoriler.map(k => <option key={k} value={k}>{k.charAt(0).toUpperCase()+k.slice(1)}</option>)}
+            </select>
+            <input placeholder="Aciklama (istege bagli)" value={form.aciklama} onChange={e => setForm({...form, aciklama:e.target.value})} />
+            <Btn onClick={kaydet}>Kaydet</Btn>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+};
+
 const PaketSiparis = ({ isletmeId, kullaniciId, menu, malzemeler, setMalzemeler, setSatislar, accent, kategoriler }) => {
   const [siparisler, setSiparisler] = useState([]);
   const [yeniModal, setYeniModal] = useState(false);
@@ -1726,7 +1843,7 @@ function App() {
       {sayfa === "qrmenu" && mudur && <QRMenu isletme={isletme} menu={menu} kategoriler={kategoriler} />}
       {sayfa === "raporlar" && mudur && <Raporlar satislar={satislar} menu={menu} malzemeler={malzemeler} isletme={isletme} />}
       {sayfa === "ayarlar" && <Ayarlar kullanici={kullanici} tema={tema} setTema={setTema} setSatislar={setSatislar} />}
-      {sayfa === "masraflar" && mudur && <Masraflar isletmeId={kullanici.isletme_id} />}
+      {sayfa === "masraflar" && mudur && <Masraflar isletmeId={kullanici.isletme_id} masraflar={masraflar} setMasraflar={setMasraflar} />}
       <div style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:540, background: tema==="light" ? "#ffffff" : C.surface, borderTop:"1px solid " + (tema==="light"?"#e0ddd8":C.border), display:"flex", padding:"8px 0 12px" }}>
         {nav.map(n => (
           <button key={n.id} onClick={() => setSayfa(n.id)}
