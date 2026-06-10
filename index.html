@@ -87,6 +87,57 @@ const localCache = {
   get: (key) => { try { return JSON.parse(localStorage.getItem(key)); } catch(e) { return null; } },
 };
 
+// ── ROL SİSTEMİ ──────────────────────────────────────────────────────────────
+const TUM_SAYFALAR = [
+  { id: "dashboard",   label: "Özet" },
+  { id: "masalar",     label: "Masalar" },
+  { id: "malzemeler",  label: "Stok" },
+  { id: "menu",        label: "Menü" },
+  { id: "mutfak",      label: "Mutfak" },
+  { id: "paket",       label: "Paket" },
+  { id: "personel",    label: "Personel" },
+  { id: "masraflar",   label: "Masraflar" },
+  { id: "qrmenu",      label: "QR Menü" },
+  { id: "raporlar",    label: "Raporlar" },
+];
+
+const ROL_ERISIM = {
+  mudur:       ["dashboard","masalar","malzemeler","menu","mutfak","paket","personel","masraflar","qrmenu","raporlar","ayarlar"],
+  kasiyer:     ["dashboard","masalar","malzemeler","ayarlar"],
+  garson:      ["dashboard","masalar","ayarlar"],
+  mutfak:      ["mutfak","ayarlar"],
+  kasiyer_yrd: ["dashboard","masalar","ayarlar"],
+};
+
+const HAZIR_ROLLER = [
+  { deger: "mudur",       label: "Müdür",           aciklama: "Tüm sayfalara erişim",       renk: "#f5a623" },
+  { deger: "kasiyer",     label: "Kasiyer",          aciklama: "Özet, Masalar, Stok",        renk: "#52c97a" },
+  { deger: "garson",      label: "Garson",           aciklama: "Özet, Masalar",              renk: "#7b68ee" },
+  { deger: "mutfak",      label: "Mutfak Personeli", aciklama: "Sadece Mutfak ekranı",       renk: "#e8a830" },
+  { deger: "kasiyer_yrd", label: "Kasiyer Yrd.",     aciklama: "Özet, Masalar",              renk: "#30c8e8" },
+  { deger: "ozel",        label: "Özel Rol",         aciklama: "Erişimi kendin belirle",     renk: "#8a847a" },
+];
+
+const rolLabel = (rol, rol_ad) => {
+  if (rol === "ozel" && rol_ad) return rol_ad;
+  const map = { mudur:"Müdür", kasiyer:"Kasiyer", garson:"Garson", mutfak:"Mutfak", kasiyer_yrd:"Kasiyer Yrd.", ozel:"Özel Rol" };
+  return map[rol] || rol;
+};
+
+const rolRenk = (rol) => {
+  const map = { mudur:"#f5a623", kasiyer:"#52c97a", garson:"#7b68ee", mutfak:"#e8a830", kasiyer_yrd:"#30c8e8", ozel:"#8a847a" };
+  return map[rol] || "#8a847a";
+};
+
+const erisimListesi = (kullanici) => {
+  if (!kullanici) return [];
+  if (kullanici.rol === "ozel" && kullanici.erisim) {
+    const liste = Array.isArray(kullanici.erisim) ? kullanici.erisim : [];
+    return [...liste, "ayarlar"];
+  }
+  return ROL_ERISIM[kullanici.rol] || ROL_ERISIM["kasiyer"];
+};
+
 const GirisEkrani = ({ onGiris }) => {
   const [email, setEmail] = useState("");
   const [sifre, setSifre] = useState("");
@@ -149,49 +200,44 @@ const GirisEkrani = ({ onGiris }) => {
   );
 };
 
-const Ayarlar = ({ kullanici, tema, setTema, setSatislar }) => {
+const Ayarlar = ({ kullanici, tema, setTema, isletmeId, setSatislar }) => {
   const [isletme, setIsletme] = useState(kullanici.isletmeler);
   const [kayit, setKayit] = useState(false);
-  const [yeniK, setYeniK] = useState({ email: "", sifre: "", rol: "kasiyer" });
+  const [yeniK, setYeniK] = useState({ email: "", sifre: "", rol: "kasiyer", ozelAd: "", erisim: [] });
   const [mesaj, setMesaj] = useState("");
   const [logoYukleniyor, setLogoYukleniyor] = useState(false);
-  const [silModal, setSilModal] = useState(null); // "satislar" | "zayi" | "adisyonlar" | "hepsi"
-  const [silYukleniyor, setSilYukleniyor] = useState(false);
+  const [kullanicilar, setKullanicilar] = useState([]);
+  const [kullanicilariGoster, setKullanicilariGoster] = useState(false);
   const fileRef = useRef();
 
-  const veriSil = async (tip) => {
-    setSilYukleniyor(true);
-    const isletmeId = isletme.id;
-    try {
-      if (tip === "satislar" || tip === "hepsi") {
-        await sb.from("satislar").delete().eq("isletme_id", isletmeId).neq("tip", "zayi");
-      }
-      if (tip === "zayi" || tip === "hepsi") {
-        await sb.from("satislar").delete().eq("isletme_id", isletmeId).eq("tip", "zayi");
-      }
-      if (tip === "adisyonlar" || tip === "hepsi") {
-        await sb.from("adisyonlar").delete().eq("isletme_id", isletmeId);
-      }
-      if (tip === "hepsi") {
-        await sb.from("satislar").delete().eq("isletme_id", isletmeId);
-      }
-      setSatislar([]);
-      localCache.set("satislar_" + isletmeId, []);
-      setMesaj("Veriler silindi!");
-      setTimeout(() => setMesaj(""), 3000);
-    } catch(e) {
-      setMesaj("Hata: " + e.message);
+  useEffect(() => {
+    if (kullanici.rol === "mudur") {
+      kullanicilariYukle();
     }
-    setSilYukleniyor(false);
-    setSilModal(null);
+  }, []);
+
+  const kullanicilariYukle = async () => {
+    const { data } = await sb.from("kullanicilar").select("*").eq("isletme_id", isletme.id);
+    setKullanicilar(data || []);
   };
 
-  const silSecenekleri = [
-    { tip: "satislar", label: "Satis Kayitlarini Sil", aciklama: "Tum ciro ve siparis gecmisi silinir", renk: C.red },
-    { tip: "zayi", label: "Zayi Kayitlarini Sil", aciklama: "Tum zayi gecmisi silinir", renk: C.red },
-    { tip: "adisyonlar", label: "Acik Adisyonlari Sil", aciklama: "Tum acik masa adisyonlari silinir", renk: C.red },
-    { tip: "hepsi", label: "TUMU SIL", aciklama: "Satis, zayi ve adisyon tum veriler silinir!", renk: "#b00" },
-  ];
+  const kullaniciSil = async (hedefKullanici) => {
+    if (hedefKullanici.id === kullanici.id) {
+      setMesaj("Kendinizi silemezsiniz.");
+      setTimeout(() => setMesaj(""), 3000);
+      return;
+    }
+    if (!window.confirm(`${hedefKullanici.email} adlı kullanıcıyı silmek istediğinize emin misiniz?`)) return;
+    try {
+      const { error } = await sb.from("kullanicilar").delete().eq("id", hedefKullanici.id);
+      if (error) throw error;
+      setKullanicilar(k => k.filter(x => x.id !== hedefKullanici.id));
+      setMesaj("Kullanici silindi!");
+      setTimeout(() => setMesaj(""), 2000);
+    } catch (e) {
+      setMesaj("Hata: " + e.message);
+    }
+  };
 
   const isletmeGuncelle = async () => {
     const { error } = await sb.from("isletmeler").update({ ad: isletme.ad, renk: isletme.renk }).eq("id", isletme.id);
@@ -214,11 +260,22 @@ const Ayarlar = ({ kullanici, tema, setTema, setSatislar }) => {
   };
 
   const kasiyerEkle = async () => {
+    if (!yeniK.email || !yeniK.sifre) return;
+    if (yeniK.rol === "ozel" && !yeniK.erisim.length) { setMesaj("Ozel rol icin en az 1 sayfa secin."); return; }
     try {
       const { data, error } = await sb.auth.signUp({ email: yeniK.email, password: yeniK.sifre });
       if (error) throw error;
-      await sb.from("kullanicilar").insert({ id: data.user.id, isletme_id: isletme.id, email: yeniK.email, rol: yeniK.rol });
-      setMesaj("Kullanici eklendi!"); setYeniK({ email: "", sifre: "", rol: "kasiyer" }); setKayit(false);
+      const kayitObj = {
+        id: data.user.id,
+        isletme_id: isletme.id,
+        email: yeniK.email,
+        rol: yeniK.rol,
+        rol_ad: yeniK.rol === "ozel" ? (yeniK.ozelAd || "Özel Rol") : null,
+        erisim: yeniK.rol === "ozel" ? yeniK.erisim : (ROL_ERISIM[yeniK.rol] || ROL_ERISIM["kasiyer"]),
+      };
+      await sb.from("kullanicilar").insert(kayitObj);
+      setMesaj("Kullanici eklendi!"); setYeniK({ email: "", sifre: "", rol: "kasiyer", ozelAd: "", erisim: [] }); setKayit(false);
+      await kullanicilariYukle();
       setTimeout(() => setMesaj(""), 2000);
     } catch (e) { setMesaj("Hata: " + e.message); }
   };
@@ -228,7 +285,7 @@ const Ayarlar = ({ kullanici, tema, setTema, setSatislar }) => {
   return (
     <div className="fade-in" style={{ padding: 16 }}>
       <div style={{ fontFamily: "Syne", fontSize: 20, fontWeight: 700, marginBottom: 16 }}>Ayarlar</div>
-      {mesaj && <div style={{ color: C.green, marginBottom: 12, fontSize: 14 }}>{mesaj}</div>}
+      {mesaj && <div style={{ color: mesaj.startsWith("Hata") || mesaj.startsWith("Kendinizi") ? C.red : C.green, marginBottom: 12, fontSize: 14 }}>{mesaj}</div>}
 
       <Card style={{ marginBottom: 12 }}>
         <div style={{ fontWeight: 600, marginBottom: 12, color: C.muted, fontSize: 13 }}>GORUNUM</div>
@@ -271,91 +328,159 @@ const Ayarlar = ({ kullanici, tema, setTema, setSatislar }) => {
       {kullanici.rol === "mudur" && (
         <Card style={{ marginBottom: 12 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-            <div style={{ fontWeight: 600, color: C.muted, fontSize: 13 }}>KULLANICI EKLE</div>
-            <Btn small variant="ghost" onClick={() => setKayit(!kayit)}>{kayit ? "Iptal" : "+ Ekle"}</Btn>
+            <div style={{ fontWeight: 600, color: C.muted, fontSize: 13 }}>KULLANICI YONETIMI</div>
+            <div style={{ display:"flex", gap:8 }}>
+              <Btn small variant="ghost" onClick={() => { setKullanicilariGoster(!kullanicilariGoster); setKayit(false); }}>
+                {kullanicilariGoster ? "Gizle" : "Listele"}
+              </Btn>
+              <Btn small onClick={() => { setKayit(!kayit); setKullanicilariGoster(false); }}>{kayit ? "Iptal" : "+ Ekle"}</Btn>
+            </div>
           </div>
+
+          {/* Kullanici listesi */}
+          {kullanicilariGoster && (
+            <div style={{ marginBottom: kayit ? 12 : 0 }}>
+              {kullanicilar.map(k => (
+                <div key={k.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 0", borderBottom:`1px solid ${C.border}` }}>
+                  <div>
+                    <div style={{ fontSize:14, fontWeight:600 }}>{k.email}</div>
+                    <Badge color={rolRenk(k.rol)}>{rolLabel(k.rol, k.rol_ad)}</Badge>
+                  </div>
+                  {k.id !== kullanici.id ? (
+                    <Btn small variant="danger" onClick={() => kullaniciSil(k)}>Sil</Btn>
+                  ) : (
+                    <span style={{ fontSize:12, color:C.muted, fontStyle:"italic" }}>Sen</span>
+                  )}
+                </div>
+              ))}
+              {kullanicilar.length === 0 && (
+                <div style={{ color:C.muted, textAlign:"center", padding:16, fontSize:13 }}>Kullanici bulunamadi</div>
+              )}
+            </div>
+          )}
+
+          {/* Yeni kullanici ekleme formu */}
           {kayit && (
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               <input placeholder="E-posta" value={yeniK.email} onChange={e => setYeniK({...yeniK, email: e.target.value})} />
               <input type="password" placeholder="Sifre" value={yeniK.sifre} onChange={e => setYeniK({...yeniK, sifre: e.target.value})} />
-              <select value={yeniK.rol} onChange={e => setYeniK({...yeniK, rol: e.target.value})}>
-                <option value="kasiyer">Kasiyer</option>
-                <option value="mudur">Mudur</option>
-              </select>
-              <Btn onClick={kasiyerEkle}>Kullanici Ekle</Btn>
+
+              <div style={{ fontSize: 13, color: C.muted }}>Rol seç:</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {HAZIR_ROLLER.map(r => (
+                  <div key={r.deger} onClick={() => setYeniK({...yeniK, rol: r.deger, erisim: ROL_ERISIM[r.deger] || []})}
+                    style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 12px",
+                      background: yeniK.rol === r.deger ? r.renk + "22" : C.surface,
+                      border: "1px solid " + (yeniK.rol === r.deger ? r.renk : C.border),
+                      borderRadius: 10, cursor: "pointer" }}>
+                    <div style={{ width:10, height:10, borderRadius:"50%", background:r.renk, flexShrink:0 }} />
+                    <div style={{ flex:1 }}>
+                      <div style={{ fontWeight:600, fontSize:13, color: yeniK.rol===r.deger ? r.renk : C.text }}>{r.label}</div>
+                      <div style={{ fontSize:11, color:C.muted }}>{r.aciklama}</div>
+                    </div>
+                    {yeniK.rol === r.deger && <span style={{ color:r.renk, fontSize:14 }}>✓</span>}
+                  </div>
+                ))}
+              </div>
+
+              {yeniK.rol === "ozel" && (
+                <input placeholder="Rol adı (örn: Barista, Şef, Kasa...)" value={yeniK.ozelAd}
+                  onChange={e => setYeniK({...yeniK, ozelAd: e.target.value})} />
+              )}
+
+              {yeniK.rol === "ozel" && (
+                <div>
+                  <div style={{ fontSize:13, color:C.muted, marginBottom:8 }}>Hangi sayfalara erişebilsin?</div>
+                  <div style={{ display:"flex", flexWrap:"wrap", gap:7 }}>
+                    {TUM_SAYFALAR.map(s => {
+                      const secili = yeniK.erisim.includes(s.id);
+                      return (
+                        <div key={s.id} onClick={() => {
+                          const yeni = secili ? yeniK.erisim.filter(x => x !== s.id) : [...yeniK.erisim, s.id];
+                          setYeniK({...yeniK, erisim: yeni});
+                        }} style={{ padding:"6px 13px", borderRadius:20, fontSize:12, cursor:"pointer",
+                          background: secili ? C.accent + "22" : "transparent",
+                          color: secili ? C.accent : C.muted,
+                          border: "1px solid " + (secili ? C.accent : C.border),
+                          fontWeight: secili ? 600 : 400 }}>
+                          {s.label}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <Btn onClick={kasiyerEkle} disabled={!yeniK.email || !yeniK.sifre || (yeniK.rol === "ozel" && !yeniK.erisim.length)}>
+                Kullanici Ekle
+              </Btn>
             </div>
           )}
+        </Card>
+      )}
+
+      {kullanici.rol === "mudur" && (
+        <Card style={{ marginBottom: 12, border: `1px solid ${C.red}44` }}>
+          <div style={{ fontWeight: 600, color: C.muted, fontSize: 13, marginBottom: 8 }}>TEST / GELİSTİRME</div>
+          <div style={{ fontSize: 13, color: C.muted, marginBottom: 12 }}>
+            Deneme sirasinda olusturulan satis kayitlarini siler. Geri alinamaz!
+          </div>
+          <Btn variant="danger" onClick={async () => {
+            if (!window.confirm("TUM satis kayitlarini silmek istediginize emin misiniz? Bu islem geri alinamaz!")) return;
+            await sb.from("satislar").delete().eq("isletme_id", isletmeId);
+            setSatislar([]);
+            setMesaj("Tum satis kayitlari silindi!");
+            setTimeout(() => setMesaj(""), 3000);
+          }}>🗑️ Tum Satis Kayitlarini Sifirla</Btn>
         </Card>
       )}
 
       <Card>
         <div style={{ fontSize: 14, color: C.muted, marginBottom: 4 }}>Giris yapan</div>
         <div style={{ fontWeight: 600, marginBottom: 6 }}>{kullanici.email}</div>
-        <Badge color={kullanici.rol === "mudur" ? C.accent : C.green}>{kullanici.rol === "mudur" ? "Mudur" : "Kasiyer"}</Badge>
+        <Badge color={rolRenk(kullanici.rol)}>{rolLabel(kullanici.rol, kullanici.rol_ad)}</Badge>
         <div style={{ marginTop: 16 }}>
           <Btn variant="danger" onClick={cikisYap}>Cikis Yap</Btn>
         </div>
       </Card>
-
-      {kullanici.rol === "mudur" && (
-        <Card style={{ marginTop: 12, border: "1px solid " + C.red + "44" }}>
-          <div style={{ fontWeight: 600, color: C.red, fontSize: 13, marginBottom: 4 }}>TEHLIKELI BOLGE</div>
-          <div style={{ fontSize: 12, color: C.muted, marginBottom: 14 }}>Bu islemler geri alinamaz, dikkatli kullanin!</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {silSecenekleri.map(s => (
-              <div key={s.tip} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 12px", background: s.renk + "11", border:"1px solid " + s.renk + "33", borderRadius:10 }}>
-                <div>
-                  <div style={{ fontWeight:600, fontSize:13, color: s.renk }}>{s.label}</div>
-                  <div style={{ fontSize:11, color:C.muted, marginTop:2 }}>{s.aciklama}</div>
-                </div>
-                <Btn small variant="danger" onClick={() => setSilModal(s.tip)} style={{ background: s.renk + "22", color: s.renk, border:"1px solid " + s.renk + "44", flexShrink:0 }}>Sil</Btn>
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
-
-      {silModal && (
-        <Modal title="Emin misin?" onClose={() => setSilModal(null)}>
-          <div style={{ color: C.muted, fontSize: 14, marginBottom: 20 }}>
-            <span style={{ color: C.red, fontWeight: 700 }}>
-              {silSecenekleri.find(s => s.tip === silModal).label}
-            </span>
-            {" "}islemi geri alinamaz. Devam etmek istiyor musun?
-          </div>
-          <div style={{ display:"flex", gap:10 }}>
-            <Btn variant="ghost" onClick={() => setSilModal(null)} style={{ flex:1 }}>Iptal</Btn>
-            <Btn variant="danger" onClick={() => veriSil(silModal)} disabled={silYukleniyor} style={{ flex:1 }}>
-              {silYukleniyor ? "Siliniyor..." : "Evet, Sil"}
-            </Btn>
-          </div>
-        </Modal>
-      )}
     </div>
   );
 };
 
-const Dashboard = ({ isletme, malzemeler, menu, satislar }) => {
+const Dashboard = ({ isletme, malzemeler, menu, satislar, masraflar }) => {
   const accent = isletme?.renk || C.accent;
   const dusukStok = malzemeler.filter(m => m.stok <= m.min_stok);
   const simdi = new Date();
-  const bugun = simdi.toDateString();
 
-  const satirSatislar = satislar.filter(s => !s.tip || s.tip !== "zayi");
-
-  const bugunSatis = satirSatislar.filter(s => new Date(s.tarih).toDateString() === bugun);
+  // Gunluk - bugun gece yarısından itibaren
+  const bugunBaslangic = new Date(simdi); bugunBaslangic.setHours(0,0,0,0);
+  const bugunSatis = satislar.filter(s => new Date(s.tarih) >= bugunBaslangic && (!s.tip || s.tip !== "zayi"));
   const bugunCiro = bugunSatis.reduce((t, s) => t + s.toplam, 0);
 
-  const haftaSatis = satirSatislar.filter(s => (simdi - new Date(s.tarih)) < 7*24*3600*1000);
+  // Haftalık - bu haftanın Pazartesi'sinden itibaren
+  const haftaBaslangic = new Date(simdi);
+  const gun = haftaBaslangic.getDay();
+  const fark = (gun === 0 ? -6 : 1 - gun);
+  haftaBaslangic.setDate(haftaBaslangic.getDate() + fark);
+  haftaBaslangic.setHours(0,0,0,0);
+  const haftaSatis = satislar.filter(s => new Date(s.tarih) >= haftaBaslangic && (!s.tip || s.tip !== "zayi"));
   const haftaCiro = haftaSatis.reduce((t, s) => t + s.toplam, 0);
 
-  const aylikSatis = satirSatislar.filter(s => {
-    const t = new Date(s.tarih);
-    return t.getMonth() === simdi.getMonth() && t.getFullYear() === simdi.getFullYear();
-  });
-  const aylikCiro = aylikSatis.reduce((t, s) => t + s.toplam, 0);
+  // Aylık - bu ayın 1'inden itibaren
+  const ayBaslangic = new Date(simdi.getFullYear(), simdi.getMonth(), 1, 0, 0, 0, 0);
+  const aySatis = satislar.filter(s => new Date(s.tarih) >= ayBaslangic && (!s.tip || s.tip !== "zayi"));
+  const ayCiro = aySatis.reduce((t, s) => t + s.toplam, 0);
 
-  const ayAdi = simdi.toLocaleString("tr-TR", { month: "long" });
+  // Masraflar
+  const bugunMasraf = (masraflar||[]).filter(m => new Date(m.tarih) >= bugunBaslangic).reduce((t,m) => t+m.tutar, 0);
+  const haftaMasraf = (masraflar||[]).filter(m => new Date(m.tarih) >= haftaBaslangic).reduce((t,m) => t+m.tutar, 0);
+  const ayMasraf = (masraflar||[]).filter(m => new Date(m.tarih) >= ayBaslangic).reduce((t,m) => t+m.tutar, 0);
+
+  const [donem, setDonem] = useState("bugun");
+  const ciro = donem === "bugun" ? bugunCiro : donem === "hafta" ? haftaCiro : ayCiro;
+  const masraf = donem === "bugun" ? bugunMasraf : donem === "hafta" ? haftaMasraf : ayMasraf;
+  const satisSayisi = donem === "bugun" ? bugunSatis.length : donem === "hafta" ? haftaSatis.length : aySatis.length;
+  const donemLabel = donem === "bugun" ? "Bugun" : donem === "hafta" ? "Bu Hafta" : "Bu Ay";
 
   return (
     <div className="fade-in" style={{ padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
@@ -368,58 +493,47 @@ const Dashboard = ({ isletme, malzemeler, menu, satislar }) => {
         </div>
       </div>
 
-      <div style={{ fontWeight: 600, color: C.muted, fontSize: 12 }}>GUNLUK</div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: -8 }}>
-        <Card>
-          <div style={{ fontSize: 20 }}>📈</div>
-          <div style={{ fontSize: 22, fontWeight: 700, color: C.green, marginTop: 4 }}>₺{bugunCiro.toLocaleString()}</div>
-          <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>Bugun Ciro</div>
-        </Card>
-        <Card>
-          <div style={{ fontSize: 20 }}>🧾</div>
-          <div style={{ fontSize: 22, fontWeight: 700, color: accent, marginTop: 4 }}>{bugunSatis.length} siparis</div>
-          <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>Bugun Satis</div>
-        </Card>
+      {/* Dönem seçici */}
+      <div style={{ display:"flex", gap:8 }}>
+        {[["bugun","Bugun"],["hafta","Bu Hafta"],["ay","Bu Ay"]].map(([k,l]) => (
+          <button key={k} onClick={() => setDonem(k)}
+            style={{ flex:1, background: donem===k ? accent : C.card, color: donem===k ? "#000":"#fff", border:"1px solid " + (donem===k?accent:C.border), borderRadius:20, padding:"7px 0", fontSize:12, cursor:"pointer", fontWeight: donem===k?700:400 }}>
+            {l}
+          </button>
+        ))}
       </div>
 
-      <div style={{ fontWeight: 600, color: C.muted, fontSize: 12 }}>HAFTALIK</div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: -8 }}>
-        <Card>
-          <div style={{ fontSize: 20 }}>📊</div>
-          <div style={{ fontSize: 22, fontWeight: 700, color: C.green, marginTop: 4 }}>₺{haftaCiro.toLocaleString()}</div>
-          <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>Son 7 Gun Ciro</div>
-        </Card>
-        <Card>
-          <div style={{ fontSize: 20 }}>🧾</div>
-          <div style={{ fontSize: 22, fontWeight: 700, color: accent, marginTop: 4 }}>{haftaSatis.length} siparis</div>
-          <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>Son 7 Gun Satis</div>
-        </Card>
-      </div>
-
-      <div style={{ fontWeight: 600, color: C.muted, fontSize: 12 }}>AYLIK — {ayAdi.toUpperCase()}</div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: -8 }}>
-        <Card>
-          <div style={{ fontSize: 20 }}>💰</div>
-          <div style={{ fontSize: 22, fontWeight: 700, color: C.green, marginTop: 4 }}>₺{aylikCiro.toLocaleString()}</div>
-          <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>{ayAdi} Ciro</div>
-        </Card>
-        <Card>
-          <div style={{ fontSize: 20 }}>🧾</div>
-          <div style={{ fontSize: 22, fontWeight: 700, color: accent, marginTop: 4 }}>{aylikSatis.length} siparis</div>
-          <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>{ayAdi} Satis</div>
-        </Card>
-      </div>
+      {/* Ana ciro kartı */}
+      <Card style={{ background: accent + "15", border: `1px solid ${accent}44` }}>
+        <div style={{ fontSize:13, color:C.muted, marginBottom:4 }}>{donemLabel} Ciro</div>
+        <div style={{ fontFamily:"Syne", fontSize:34, fontWeight:800, color:accent }}>₺{ciro.toLocaleString()}</div>
+        <div style={{ display:"flex", gap:16, marginTop:8 }}>
+          <div><span style={{ color:C.muted, fontSize:12 }}>Satis: </span><span style={{ fontWeight:600, fontSize:13 }}>{satisSayisi} adet</span></div>
+          <div><span style={{ color:C.muted, fontSize:12 }}>Masraf: </span><span style={{ fontWeight:600, fontSize:13, color:C.red }}>-₺{masraf.toLocaleString()}</span></div>
+          <div><span style={{ color:C.muted, fontSize:12 }}>Net: </span><span style={{ fontWeight:700, fontSize:13, color: (ciro-masraf)>=0 ? C.green : C.red }}>₺{(ciro-masraf).toLocaleString()}</span></div>
+        </div>
+      </Card>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
         <Card>
-          <div style={{ fontSize: 20 }}>⚠️</div>
-          <div style={{ fontSize: 22, fontWeight: 700, color: dusukStok.length > 0 ? C.red : C.green, marginTop: 4 }}>{dusukStok.length} urun</div>
-          <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>Dusuk Stok</div>
+          <div style={{ fontSize: 18 }}>📊</div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: C.green, marginTop: 4 }}>₺{bugunCiro.toLocaleString()}</div>
+          <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>Bugun Ciro</div>
         </Card>
         <Card>
-          <div style={{ fontSize: 20 }}>📦</div>
-          <div style={{ fontSize: 22, fontWeight: 700, color: C.text, marginTop: 4 }}>{malzemeler.length}</div>
-          <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>Toplam Malzeme</div>
+          <div style={{ fontSize: 18 }}>📅</div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: accent, marginTop: 4 }}>₺{ayCiro.toLocaleString()}</div>
+          <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>Aylik Ciro</div>
+        </Card>
+        <Card>
+          <div style={{ fontSize: 18 }}>💸</div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: C.red, marginTop: 4 }}>₺{ayMasraf.toLocaleString()}</div>
+          <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>Aylik Masraf</div>
+        </Card>
+        <Card>
+          <div style={{ fontSize: 18 }}>⚠️</div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: dusukStok.length > 0 ? C.red : C.green, marginTop: 4 }}>{dusukStok.length} urun</div>
+          <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>Dusuk Stok</div>
         </Card>
       </div>
 
@@ -732,11 +846,6 @@ const MutfakEkrani = ({ isletmeId }) => {
     setAdisyonlar(a => a.map(x => x.id === adisyonId ? {...x, mutfak_durum: durum} : x));
   };
 
-  const teslimEt = async (adisyonId) => {
-    await sb.from("adisyonlar").update({ mutfak_durum: "teslim" }).eq("id", adisyonId);
-    setAdisyonlar(a => a.filter(x => x.id !== adisyonId));
-  };
-
   const masaAd = (masaId) => {
     const m = masalar.find(m => m.id === masaId);
     return m ? m.ad : "Bilinmeyen";
@@ -780,12 +889,7 @@ const MutfakEkrani = ({ isletmeId }) => {
               <div style={{ display:"flex", gap:8, marginTop:14 }}>
                 {durum === "bekliyor" && <Btn variant="ghost" style={{ flex:1 }} onClick={() => durumGuncelle(a.id, "hazirlaniyor")}>Hazirlanıyor</Btn>}
                 {durum === "hazirlaniyor" && <Btn variant="success" style={{ flex:1 }} onClick={() => durumGuncelle(a.id, "hazir")}>Hazir</Btn>}
-                {durum === "hazir" && (
-                  <div style={{ display:"flex", gap:8, flex:1 }}>
-                    <div style={{ color:C.green, fontWeight:600, flex:1, display:"flex", alignItems:"center" }}>Servise Hazir!</div>
-                    <Btn variant="success" style={{ flexShrink:0 }} onClick={() => teslimEt(a.id)}>Teslim Edildi</Btn>
-                  </div>
-                )}
+                {durum === "hazir" && <div style={{ color:C.green, fontWeight:600, textAlign:"center", flex:1 }}>Servise Hazir!</div>}
               </div>
             </div>
           );
@@ -867,12 +971,6 @@ const Masalar = ({ isletmeId, kullaniciId, menu, malzemeler, setMalzemeler, setS
   const [odemeModal, setOdemeModal] = useState(false);
   const [yukleniyor, setYukleniyor] = useState(true);
   const [aktifKat, setAktifKat] = useState("tum");
-  const [indiriModal, setIndiriModal] = useState(false);
-  const [indiriOran, setIndiriOran] = useState("");
-  const [ikramModal, setIkramModal] = useState(false);
-  const [bolmeModal, setBolmeModal] = useState(false);
-  const [bolmeItems, setBolmeItems] = useState([]);
-  const [tasimaMasaId, setTasimaMasaId] = useState("");
 
   useEffect(() => { veriYukle(); }, []);
 
@@ -926,54 +1024,6 @@ const Masalar = ({ isletmeId, kullaniciId, menu, malzemeler, setMalzemeler, setS
     setSeciliMasa(m => ({ ...m, adisyon: yeniAdisyon }));
   };
 
-  const indirimUygula = async () => {
-    if (!indiriOran) return;
-    const adisyon = seciliMasa.adisyon;
-    const oran = Math.min(100, Math.max(0, +indiriOran));
-    const yeniToplam = +(adisyon.toplam * (1 - oran/100)).toFixed(2);
-    await sb.from("adisyonlar").update({ indirim_oran: oran, toplam: yeniToplam }).eq("id", adisyon.id);
-    const yeniAdisyon = { ...adisyon, indirim_oran: oran, toplam: yeniToplam };
-    setAdisyonlar(a => a.map(x => x.id === adisyon.id ? yeniAdisyon : x));
-    setSeciliMasa(m => ({ ...m, adisyon: yeniAdisyon }));
-    setIndiriModal(false); setIndiriOran("");
-  };
-
-  const ikramEkle = async (menuItem) => {
-    const adisyon = seciliMasa.adisyon;
-    const mevcutItems = adisyon.items || [];
-    const ikramItem = { menuId: menuItem.id, ad: menuItem.ad + " (Ikram)", fiyat: 0, qty: 1, ikram: true };
-    const yeniItems = [...mevcutItems, ikramItem];
-    await sb.from("adisyonlar").update({ items: yeniItems }).eq("id", adisyon.id);
-    const yeniAdisyon = { ...adisyon, items: yeniItems };
-    setAdisyonlar(a => a.map(x => x.id === adisyon.id ? yeniAdisyon : x));
-    setSeciliMasa(m => ({ ...m, adisyon: yeniAdisyon }));
-    setIkramModal(false);
-  };
-
-  const adisyonBol = async () => {
-    if (!bolmeItems.length || !tasimaMasaId) return;
-    const adisyon = seciliMasa.adisyon;
-    const hedefAdisyon = adisyonlar.find(a => a.masa_id === +tasimaMasaId);
-    const kalanItems = (adisyon.items||[]).filter(x => !bolmeItems.find(b => b.menuId === x.menuId));
-    const tasinanItems = bolmeItems;
-    const kalanToplam = kalanItems.reduce((t,x) => t+x.fiyat*x.qty, 0);
-    const tasinanToplam = tasinanItems.reduce((t,x) => t+x.fiyat*x.qty, 0);
-    await sb.from("adisyonlar").update({ items: kalanItems, toplam: kalanToplam }).eq("id", adisyon.id);
-    if (hedefAdisyon) {
-      const hedefItems = [...(hedefAdisyon.items||[]), ...tasinanItems];
-      const hedefToplam = hedefItems.reduce((t,x) => t+x.fiyat*x.qty, 0);
-      await sb.from("adisyonlar").update({ items: hedefItems, toplam: hedefToplam }).eq("id", hedefAdisyon.id);
-    } else {
-      await sb.from("adisyonlar").insert({ isletme_id: isletmeId, masa_id: +tasimaMasaId, kullanici_id: kullaniciId, items: tasinanItems, durum: "acik", toplam: tasinanToplam });
-      await sb.from("masalar").update({ durum: "dolu" }).eq("id", +tasimaMasaId);
-    }
-    const yeniAdisyon = { ...adisyon, items: kalanItems, toplam: kalanToplam };
-    setAdisyonlar(a => a.map(x => x.id === adisyon.id ? yeniAdisyon : x));
-    setSeciliMasa(m => ({ ...m, adisyon: yeniAdisyon }));
-    setBolmeModal(false); setBolmeItems([]); setTasimaMasaId("");
-    await veriYukle();
-  };
-
   const hesapKapat = async (odemeTipi) => {
     const adisyon = seciliMasa.adisyon;
     if (!adisyon.items || !adisyon.items.length) return;
@@ -991,7 +1041,7 @@ const Masalar = ({ isletmeId, kullaniciId, menu, malzemeler, setMalzemeler, setS
     }
     setMalzemeler(yeniMalzemeler);
     await sb.from("adisyonlar").update({ durum: "kapali", kapanis_tarihi: new Date().toISOString(), odeme_tipi: odemeTipi }).eq("id", adisyon.id);
-    const { data: satis } = await sb.from("satislar").insert({ isletme_id: isletmeId, kullanici_id: kullaniciId, items: adisyon.items, toplam: adisyon.toplam, tarih: new Date().toISOString(), masa: seciliMasa.ad, odeme_tipi: odemeTipi, indirim_oran: adisyon.indirim_oran||0 }).select().single();
+    const { data: satis } = await sb.from("satislar").insert({ isletme_id: isletmeId, kullanici_id: kullaniciId, items: adisyon.items, toplam: adisyon.toplam, tarih: new Date().toISOString(), masa: seciliMasa.ad, odeme_tipi: odemeTipi }).select().single();
     setSatislar(s => [...s, satis]);
     await sb.from("masalar").update({ durum: "bos" }).eq("id", seciliMasa.id);
     setMasalar(m => m.map(x => x.id === seciliMasa.id ? {...x, durum: "bos"} : x));
@@ -1046,40 +1096,20 @@ const Masalar = ({ isletmeId, kullaniciId, menu, malzemeler, setMalzemeler, setS
 
         {items.length > 0 ? (
           <Card style={{ border:"1px solid " + (accent||C.accent) + "44" }}>
-            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
-              <div style={{ fontWeight:600, color: accent||C.accent }}>🧾 Adisyon</div>
-              <div style={{ display:"flex", gap:6 }}>
-                <Btn small variant="ghost" onClick={() => setBolmeModal(true)}>Bol/Tasi</Btn>
-                <Btn small variant="ghost" onClick={() => setIkramModal(true)}>Ikram</Btn>
-                <Btn small variant="ghost" onClick={() => setIndiriModal(true)}>Indirim</Btn>
-              </div>
-            </div>
+            <div style={{ fontWeight:600, marginBottom:12, color: accent||C.accent }}>🧾 Adisyon</div>
             {items.map(item => (
-              <div key={item.menuId + (item.ikram?"_ikram":"")} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"6px 0", borderBottom:"1px solid " + C.border }}>
-                <span style={{ fontSize:14, color: item.ikram ? C.green : C.text }}>{item.ad}</span>
+              <div key={item.menuId} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"6px 0", borderBottom:"1px solid " + C.border }}>
+                <span style={{ fontSize:14 }}>{item.ad}</span>
                 <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                  {item.ikram
-                    ? <span style={{ color:C.green, fontSize:13, fontWeight:600 }}>Ikram</span>
-                    : <span style={{ color:C.muted, fontSize:13 }}>₺{(item.fiyat*item.qty).toFixed(0)}</span>
-                  }
-                  {!item.ikram && <button onClick={() => urunCikar(item.menuId)} style={{ background:C.border,border:"none",color:C.text,borderRadius:6,width:26,height:26,cursor:"pointer" }}>-</button>}
+                  <span style={{ color:C.muted, fontSize:13 }}>₺{(item.fiyat*item.qty).toFixed(0)}</span>
+                  <button onClick={() => urunCikar(item.menuId)} style={{ background:C.border,border:"none",color:C.text,borderRadius:6,width:26,height:26,cursor:"pointer" }}>-</button>
                   <span style={{ width:20,textAlign:"center",fontWeight:600 }}>{item.qty}</span>
-                  {!item.ikram && <button onClick={() => urunEkle(menu.find(m=>m.id===item.menuId))} style={{ background:accent||C.accent,border:"none",color:"#000",borderRadius:6,width:26,height:26,cursor:"pointer" }}>+</button>}
-                  {item.ikram && <button onClick={() => { const yeniItems=(adisyon.items||[]).filter(x=>!(x.menuId===item.menuId&&x.ikram)); const yT=yeniItems.reduce((t,x)=>t+x.fiyat*x.qty,0); sb.from("adisyonlar").update({items:yeniItems,toplam:yT}).eq("id",adisyon.id); const yA={...adisyon,items:yeniItems,toplam:yT}; setAdisyonlar(a=>a.map(x=>x.id===adisyon.id?yA:x)); setSeciliMasa(m=>({...m,adisyon:yA})); }} style={{ background:C.red+"22",border:"none",color:C.red,borderRadius:6,width:26,height:26,cursor:"pointer" }}>x</button>}
+                  <button onClick={() => urunEkle(menu.find(m=>m.id===item.menuId))} style={{ background:accent||C.accent,border:"none",color:"#000",borderRadius:6,width:26,height:26,cursor:"pointer" }}>+</button>
                 </div>
               </div>
             ))}
-            {adisyon.indirim_oran > 0 && (
-              <div style={{ display:"flex", justifyContent:"space-between", padding:"8px 0", color:C.green, fontSize:13 }}>
-                <span>Indirim (%{adisyon.indirim_oran})</span>
-                <span>-₺{(items.reduce((t,x)=>t+x.fiyat*x.qty,0) - toplam).toFixed(0)}</span>
-              </div>
-            )}
             <div style={{ display:"flex", justifyContent:"space-between", marginTop:14, alignItems:"center" }}>
-              <div>
-                {adisyon.indirim_oran > 0 && <div style={{ fontSize:12, color:C.muted, textDecoration:"line-through" }}>₺{items.reduce((t,x)=>t+x.fiyat*x.qty,0).toFixed(0)}</div>}
-                <span style={{ fontFamily:"Syne", fontSize:22, fontWeight:700 }}>₺{toplam.toFixed(0)}</span>
-              </div>
+              <span style={{ fontFamily:"Syne", fontSize:22, fontWeight:700 }}>₺{toplam.toFixed(0)}</span>
               <Btn onClick={() => setOdemeModal(true)} style={{ background: accent||C.accent, color:"#000" }}>Hesap Kapat</Btn>
             </div>
           </Card>
@@ -1095,65 +1125,6 @@ const Masalar = ({ isletmeId, kullaniciId, menu, malzemeler, setMalzemeler, setS
               <Btn onClick={() => hesapKapat("kart")} variant="ghost">Kredi/Banka Karti</Btn>
               <Btn onClick={() => hesapKapat("havale")} variant="ghost">Havale/QR</Btn>
             </div>
-          </Modal>
-        )}
-
-        {indiriModal && (
-          <Modal title="Indirim Uygula" onClose={() => { setIndiriModal(false); setIndiriOran(""); }}>
-            <div style={{ fontSize:13, color:C.muted, marginBottom:12 }}>Indirim orani girin (%)</div>
-            <input type="number" placeholder="ornek: 10" min="1" max="100" value={indiriOran} onChange={e => setIndiriOran(e.target.value)} style={{ marginBottom:12 }} />
-            <div style={{ display:"flex", gap:8, marginBottom:12 }}>
-              {[5,10,15,20,25,50].map(o => (
-                <button key={o} onClick={() => setIndiriOran(String(o))}
-                  style={{ flex:1, background: indiriOran==o ? C.accent : C.card, color: indiriOran==o ? "#000":"#fff", border:"1px solid "+(indiriOran==o?C.accent:C.border), borderRadius:8, padding:"6px 0", fontSize:12, cursor:"pointer" }}>
-                  %{o}
-                </button>
-              ))}
-            </div>
-            <Btn onClick={indirimUygula}>Uygula</Btn>
-          </Modal>
-        )}
-
-        {ikramModal && (
-          <Modal title="Ikram Ekle" onClose={() => setIkramModal(false)}>
-            <div style={{ fontSize:13, color:C.muted, marginBottom:12 }}>Hangi urunu ikram etmek istiyorsunuz?</div>
-            <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-              {menu.map(m => (
-                <div key={m.id} onClick={() => ikramEkle(m)}
-                  style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 12px", background:C.card, border:"1px solid "+C.border, borderRadius:10, cursor:"pointer" }}>
-                  <span style={{ fontWeight:600 }}>{m.ad}</span>
-                  <span style={{ color:C.green, fontSize:13 }}>Ikram</span>
-                </div>
-              ))}
-            </div>
-          </Modal>
-        )}
-
-        {bolmeModal && (
-          <Modal title="Adisyon Bol / Tasi" onClose={() => { setBolmeModal(false); setBolmeItems([]); setTasimaMasaId(""); }}>
-            <div style={{ fontSize:13, color:C.muted, marginBottom:8 }}>Tasinacak urunleri sec:</div>
-            <div style={{ display:"flex", flexDirection:"column", gap:6, marginBottom:12 }}>
-              {items.filter(x=>!x.ikram).map(item => {
-                const secili = bolmeItems.find(b => b.menuId === item.menuId);
-                return (
-                  <div key={item.menuId} onClick={() => {
-                    if (secili) setBolmeItems(b => b.filter(x => x.menuId !== item.menuId));
-                    else setBolmeItems(b => [...b, item]);
-                  }} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 12px", background: secili ? C.accent+"22" : C.card, border:"1px solid "+(secili?C.accent:C.border), borderRadius:10, cursor:"pointer" }}>
-                    <span style={{ fontWeight:600 }}>{item.ad} x{item.qty}</span>
-                    <span style={{ color:C.accent }}>₺{(item.fiyat*item.qty).toFixed(0)}</span>
-                  </div>
-                );
-              })}
-            </div>
-            <div style={{ fontSize:13, color:C.muted, marginBottom:8 }}>Hedef masa:</div>
-            <select value={tasimaMasaId} onChange={e => setTasimaMasaId(e.target.value)} style={{ marginBottom:12 }}>
-              <option value="">Masa sec</option>
-              {masalar.filter(m => m.id !== seciliMasa.id).map(m => (
-                <option key={m.id} value={m.id}>{m.ad}</option>
-              ))}
-            </select>
-            <Btn onClick={adisyonBol} disabled={!bolmeItems.length || !tasimaMasaId}>Tasi</Btn>
           </Modal>
         )}
       </div>
@@ -1193,6 +1164,121 @@ const Masalar = ({ isletmeId, kullaniciId, menu, malzemeler, setMalzemeler, setS
         <Modal title="Yeni Masa Ekle" onClose={() => setMasaModal(false)}>
           <input placeholder="Masa adi (ornek: Masa 1, Teras 2...)" value={yeniMasaAd} onChange={e => setYeniMasaAd(e.target.value)} style={{ marginBottom:12 }} />
           <Btn onClick={masaEkle}>Ekle</Btn>
+        </Modal>
+      )}
+    </div>
+  );
+};
+
+const Masraflar = ({ isletmeId, masraflar, setMasraflar }) => {
+  const [modal, setModal] = useState(false);
+  const [form, setForm] = useState({ baslik: "", tutar: "", kategori: "genel", aciklama: "" });
+  const [filtre, setFiltre] = useState("ay");
+  const simdi = new Date();
+
+  const kategoriler = ["genel","kira","personel","malzeme","elektrik","su","diger"];
+
+  const kaydet = async () => {
+    if (!form.baslik || !form.tutar) return;
+    const { data } = await sb.from("masraflar").insert({
+      isletme_id: isletmeId,
+      baslik: form.baslik,
+      tutar: +form.tutar,
+      kategori: form.kategori,
+      aciklama: form.aciklama,
+      tarih: new Date().toISOString(),
+    }).select().single();
+    setMasraflar(m => [data, ...m]);
+    setForm({ baslik:"", tutar:"", kategori:"genel", aciklama:"" });
+    setModal(false);
+  };
+
+  const sil = async (id) => {
+    if (!window.confirm("Bu masrafi silmek istediginize emin misiniz?")) return;
+    await sb.from("masraflar").delete().eq("id", id);
+    setMasraflar(m => m.filter(x => x.id !== id));
+  };
+
+  const bugunBaslangic = new Date(simdi); bugunBaslangic.setHours(0,0,0,0);
+  const haftaBaslangic = new Date(simdi);
+  const hg = haftaBaslangic.getDay();
+  haftaBaslangic.setDate(haftaBaslangic.getDate() + (hg===0?-6:1-hg));
+  haftaBaslangic.setHours(0,0,0,0);
+  const ayBaslangic = new Date(simdi.getFullYear(), simdi.getMonth(), 1);
+
+  const filtreUygula = (m) => {
+    const t = new Date(m.tarih);
+    if (filtre === "bugun") return t >= bugunBaslangic;
+    if (filtre === "hafta") return t >= haftaBaslangic;
+    if (filtre === "ay") return t >= ayBaslangic;
+    return true;
+  };
+
+  const gosterilen = masraflar.filter(filtreUygula);
+  const toplam = gosterilen.reduce((t, m) => t + m.tutar, 0);
+
+  const katRenk = { genel:C.muted, kira:C.accent, personel:"#7b68ee", malzeme:C.green, elektrik:"#e8c830", su:"#30c8e8", diger:C.red };
+
+  return (
+    <div className="fade-in" style={{ padding:16 }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
+        <span style={{ fontFamily:"Syne", fontSize:20, fontWeight:700 }}>Masraflar</span>
+        <Btn small onClick={() => setModal(true)}>+ Masraf Ekle</Btn>
+      </div>
+
+      <div style={{ display:"flex", gap:8, marginBottom:14 }}>
+        {[["bugun","Bugun"],["hafta","Bu Hafta"],["ay","Bu Ay"],["tum","Tumu"]].map(([k,l]) => (
+          <button key={k} onClick={() => setFiltre(k)}
+            style={{ background: filtre===k ? C.accent : C.card, color: filtre===k ? "#000":"#fff", border:"1px solid "+(filtre===k?C.accent:C.border), borderRadius:20, padding:"6px 12px", fontSize:12, cursor:"pointer" }}>
+            {l}
+          </button>
+        ))}
+      </div>
+
+      <Card style={{ marginBottom:14, background: C.red+"0a", border:`1px solid ${C.red}44` }}>
+        <div style={{ fontSize:12, color:C.muted }}>Toplam Masraf</div>
+        <div style={{ fontFamily:"Syne", fontSize:28, fontWeight:800, color:C.red }}>₺{toplam.toLocaleString()}</div>
+        <div style={{ fontSize:12, color:C.muted, marginTop:4 }}>{gosterilen.length} kayit</div>
+      </Card>
+
+      <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+        {gosterilen.map(m => (
+          <Card key={m.id}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+              <div style={{ flex:1 }}>
+                <div style={{ fontWeight:600, fontSize:15 }}>{m.baslik}</div>
+                <div style={{ display:"flex", gap:8, marginTop:4, alignItems:"center" }}>
+                  <Badge color={katRenk[m.kategori]||C.muted}>{m.kategori}</Badge>
+                  <span style={{ fontSize:12, color:C.muted }}>{new Date(m.tarih).toLocaleDateString("tr-TR")}</span>
+                </div>
+                {m.aciklama && <div style={{ fontSize:12, color:C.muted, marginTop:4 }}>{m.aciklama}</div>}
+              </div>
+              <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                <span style={{ fontFamily:"Syne", fontSize:18, fontWeight:700, color:C.red }}>₺{m.tutar.toLocaleString()}</span>
+                <Btn small variant="danger" onClick={() => sil(m.id)}>Sil</Btn>
+              </div>
+            </div>
+          </Card>
+        ))}
+        {gosterilen.length === 0 && (
+          <div style={{ color:C.muted, textAlign:"center", padding:40 }}>
+            <div style={{ fontSize:36, marginBottom:8 }}>💸</div>
+            Bu donemde masraf yok
+          </div>
+        )}
+      </div>
+
+      {modal && (
+        <Modal title="Yeni Masraf" onClose={() => setModal(false)}>
+          <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+            <input placeholder="Masraf basligi (ornek: Ekmek faturasi)" value={form.baslik} onChange={e => setForm({...form, baslik:e.target.value})} />
+            <input type="number" placeholder="Tutar (₺)" value={form.tutar} onChange={e => setForm({...form, tutar:e.target.value})} />
+            <select value={form.kategori} onChange={e => setForm({...form, kategori:e.target.value})}>
+              {kategoriler.map(k => <option key={k} value={k}>{k.charAt(0).toUpperCase()+k.slice(1)}</option>)}
+            </select>
+            <input placeholder="Aciklama (istege bagli)" value={form.aciklama} onChange={e => setForm({...form, aciklama:e.target.value})} />
+            <Btn onClick={kaydet}>Kaydet</Btn>
+          </div>
         </Modal>
       )}
     </div>
@@ -1304,281 +1390,99 @@ const Raporlar = ({ satislar, menu, malzemeler, isletme }) => {
   );
 };
 
-
-
-const Masraflar = ({ isletmeId, masraflar, setMasraflar }) => {
-  const [modal, setModal] = useState(false);
-  const [form, setForm] = useState({ baslik: "", tutar: "", kategori: "genel", aciklama: "" });
-  const [filtre, setFiltre] = useState("ay");
-  const simdi = new Date();
-
-  const kategoriler = ["genel","kira","personel","malzeme","elektrik","su","diger"];
-
-  const kaydet = async () => {
-    if (!form.baslik || !form.tutar) return;
-    const { data, error } = await sb.from("masraflar").insert({
-      isletme_id: isletmeId,
-      baslik: form.baslik,
-      tutar: +form.tutar,
-      kategori: form.kategori,
-      aciklama: form.aciklama,
-      tarih: new Date().toISOString(),
-    }).select().single();
-    if (error) { alert("Hata: " + error.message); return; }
-    setMasraflar(m => [data, ...m]);
-    setForm({ baslik:"", tutar:"", kategori:"genel", aciklama:"" });
-    setModal(false);
-  };
-
-  const sil = async (id) => {
-    if (!window.confirm("Bu masrafi silmek istediginize emin misiniz?")) return;
-    await sb.from("masraflar").delete().eq("id", id);
-    setMasraflar(m => m.filter(x => x.id !== id));
-  };
-
-  const bugunBaslangic = new Date(simdi); bugunBaslangic.setHours(0,0,0,0);
-  const haftaBaslangic = new Date(simdi);
-  const hg = haftaBaslangic.getDay();
-  haftaBaslangic.setDate(haftaBaslangic.getDate() + (hg===0?-6:1-hg));
-  haftaBaslangic.setHours(0,0,0,0);
-  const ayBaslangic = new Date(simdi.getFullYear(), simdi.getMonth(), 1);
-
-  const filtreUygula = (m) => {
-    const t = new Date(m.tarih);
-    if (filtre === "bugun") return t >= bugunBaslangic;
-    if (filtre === "hafta") return t >= haftaBaslangic;
-    if (filtre === "ay") return t >= ayBaslangic;
-    return true;
-  };
-
-  const gosterilen = (masraflar||[]).filter(filtreUygula);
-  const toplam = gosterilen.reduce((t, m) => t + (+m.tutar||0), 0);
-
-  const katRenk = { genel:C.muted, kira:C.accent, personel:"#7b68ee", malzeme:C.green, elektrik:"#e8c830", su:"#30c8e8", diger:C.red };
-
-  return (
-    <div className="fade-in" style={{ padding:16 }}>
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
-        <span style={{ fontFamily:"Syne", fontSize:20, fontWeight:700 }}>Masraflar</span>
-        <Btn small onClick={() => setModal(true)}>+ Masraf Ekle</Btn>
-      </div>
-
-      <div style={{ display:"flex", gap:8, marginBottom:14 }}>
-        {[["bugun","Bugun"],["hafta","Bu Hafta"],["ay","Bu Ay"],["tum","Tumu"]].map(([k,l]) => (
-          <button key={k} onClick={() => setFiltre(k)}
-            style={{ background: filtre===k ? C.accent : C.card, color: filtre===k ? "#000":"#fff", border:"1px solid "+(filtre===k?C.accent:C.border), borderRadius:20, padding:"6px 12px", fontSize:12, cursor:"pointer" }}>
-            {l}
-          </button>
-        ))}
-      </div>
-
-      <Card style={{ marginBottom:14, background: C.red+"0a", border:"1px solid "+C.red+"44" }}>
-        <div style={{ fontSize:12, color:C.muted }}>Toplam Masraf</div>
-        <div style={{ fontFamily:"Syne", fontSize:28, fontWeight:800, color:C.red }}>₺{toplam.toLocaleString()}</div>
-        <div style={{ fontSize:12, color:C.muted, marginTop:4 }}>{gosterilen.length} kayit</div>
-      </Card>
-
-      <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-        {gosterilen.map(m => (
-          <Card key={m.id}>
-            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
-              <div style={{ flex:1 }}>
-                <div style={{ fontWeight:600, fontSize:15 }}>{m.baslik}</div>
-                <div style={{ display:"flex", gap:8, marginTop:4, alignItems:"center" }}>
-                  <Badge color={katRenk[m.kategori]||C.muted}>{m.kategori}</Badge>
-                  <span style={{ fontSize:12, color:C.muted }}>{new Date(m.tarih).toLocaleDateString("tr-TR")}</span>
-                </div>
-                {m.aciklama && <div style={{ fontSize:12, color:C.muted, marginTop:4 }}>{m.aciklama}</div>}
-              </div>
-              <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-                <span style={{ fontFamily:"Syne", fontSize:18, fontWeight:700, color:C.red }}>₺{(+m.tutar).toLocaleString()}</span>
-                <Btn small variant="danger" onClick={() => sil(m.id)}>Sil</Btn>
-              </div>
-            </div>
-          </Card>
-        ))}
-        {gosterilen.length === 0 && (
-          <div style={{ color:C.muted, textAlign:"center", padding:40 }}>
-            <div style={{ fontSize:36, marginBottom:8 }}>💸</div>
-            Bu donemde masraf yok
-          </div>
-        )}
-      </div>
-
-      {modal && (
-        <Modal title="Yeni Masraf" onClose={() => setModal(false)}>
-          <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
-            <input placeholder="Masraf basligi (ornek: Ekmek faturasi)" value={form.baslik} onChange={e => setForm({...form, baslik:e.target.value})} />
-            <input type="number" placeholder="Tutar (₺)" value={form.tutar} onChange={e => setForm({...form, tutar:e.target.value})} />
-            <select value={form.kategori} onChange={e => setForm({...form, kategori:e.target.value})}>
-              {kategoriler.map(k => <option key={k} value={k}>{k.charAt(0).toUpperCase()+k.slice(1)}</option>)}
-            </select>
-            <input placeholder="Aciklama (istege bagli)" value={form.aciklama} onChange={e => setForm({...form, aciklama:e.target.value})} />
-            <Btn onClick={kaydet}>Kaydet</Btn>
-          </div>
-        </Modal>
-      )}
-    </div>
-  );
-};
-
 const PaketSiparis = ({ isletmeId, kullaniciId, menu, malzemeler, setMalzemeler, setSatislar, accent, kategoriler }) => {
   const [siparisler, setSiparisler] = useState([]);
   const [yeniModal, setYeniModal] = useState(false);
   const [aktifKat, setAktifKat] = useState("tum");
-  const [form, setForm] = useState({ musteri: "", telefon: "", adres: "", not: "" });
+  const [form, setForm] = useState({ musteri:"", telefon:"", adres:"", not:"" });
   const [sepet, setSepet] = useState([]);
   const [detayId, setDetayId] = useState(null);
-  const [odemeModal, setOdemeModal] = useState(false);
 
   useEffect(() => { veriYukle(); }, []);
-
   const veriYukle = async () => {
-    const { data } = await sb.from("paket_siparisler").select("*").eq("isletme_id", isletmeId).eq("durum", "acik").order("tarih", { ascending: false });
+    const { data } = await sb.from("paket_siparisler").select("*").eq("isletme_id", isletmeId).eq("durum","acik").order("tarih",{ascending:false});
     setSiparisler(data || []);
   };
-
-  const sepetEkle = (m) => {
-    const var_ = sepet.find(x => x.menuId === m.id);
-    if (var_) setSepet(s => s.map(x => x.menuId===m.id ? {...x,qty:x.qty+1} : x));
-    else setSepet(s => [...s, { menuId:m.id, ad:m.ad, fiyat:m.fiyat, qty:1 }]);
-  };
-
-  const sepetCikar = (menuId) => {
-    setSepet(s => s.map(x=>x.menuId===menuId?{...x,qty:x.qty-1}:x).filter(x=>x.qty>0));
-  };
-
+  const sepetEkle = (m) => { const v=sepet.find(x=>x.menuId===m.id); if(v) setSepet(s=>s.map(x=>x.menuId===m.id?{...x,qty:x.qty+1}:x)); else setSepet(s=>[...s,{menuId:m.id,ad:m.ad,fiyat:m.fiyat,qty:1}]); };
+  const sepetCikar = (id) => setSepet(s=>s.map(x=>x.menuId===id?{...x,qty:x.qty-1}:x).filter(x=>x.qty>0));
   const siparisKaydet = async () => {
-    if (!form.musteri || !sepet.length) return;
-    const toplam = sepet.reduce((t,x)=>t+x.fiyat*x.qty,0);
-    const { data } = await sb.from("paket_siparisler").insert({
-      isletme_id: isletmeId,
-      kullanici_id: kullaniciId,
-      musteri_ad: form.musteri,
-      telefon: form.telefon,
-      adres: form.adres,
-      not: form.not,
-      items: sepet,
-      toplam,
-      durum: "acik",
-      tarih: new Date().toISOString(),
-    }).select().single();
-    setSiparisler(s => [data, ...s]);
-    setYeniModal(false);
-    setSepet([]); setForm({ musteri:"", telefon:"", adres:"", not:"" });
+    if (!form.musteri||!sepet.length) return;
+    const toplam=sepet.reduce((t,x)=>t+x.fiyat*x.qty,0);
+    const {data}=await sb.from("paket_siparisler").insert({isletme_id:isletmeId,kullanici_id:kullaniciId,musteri_ad:form.musteri,telefon:form.telefon,adres:form.adres,not:form.not,items:sepet,toplam,durum:"acik",tarih:new Date().toISOString()}).select().single();
+    setSiparisler(s=>[data,...s]); setYeniModal(false); setSepet([]); setForm({musteri:"",telefon:"",adres:"",not:""});
   };
-
   const durumGuncelle = async (id, durum) => {
-    await sb.from("paket_siparisler").update({ durum }).eq("id", id);
-    if (durum === "teslim") {
-      const s = siparisler.find(x=>x.id===id);
-      const { data: satis } = await sb.from("satislar").insert({ isletme_id: isletmeId, kullanici_id: kullaniciId, items: s.items, toplam: s.toplam, tarih: new Date().toISOString(), masa: "Paket - " + s.musteri_ad, odeme_tipi: "nakit" }).select().single();
-      setSatislar(sv => [...sv, satis]);
-      setSiparisler(sv => sv.filter(x=>x.id!==id));
-    } else {
-      setSiparisler(sv => sv.map(x=>x.id===id?{...x,durum}:x));
-    }
+    await sb.from("paket_siparisler").update({durum}).eq("id",id);
+    if (durum==="teslim") {
+      const s=siparisler.find(x=>x.id===id);
+      const {data:satis}=await sb.from("satislar").insert({isletme_id:isletmeId,kullanici_id:kullaniciId,items:s.items,toplam:s.toplam,tarih:new Date().toISOString(),masa:"Paket - "+s.musteri_ad,odeme_tipi:"nakit"}).select().single();
+      setSatislar(sv=>[...sv,satis]); setSiparisler(sv=>sv.filter(x=>x.id!==id));
+    } else { setSiparisler(sv=>sv.map(x=>x.id===id?{...x,durum}:x)); }
     setDetayId(null);
   };
-
   const sipToplam = sepet.reduce((t,x)=>t+x.fiyat*x.qty,0);
-  const durumRenk = { acik: C.accent, hazirlaniyor: "#e8a830", yolda: "#7b68ee", teslim: C.green };
-  const durumLabel = { acik: "Yeni", hazirlaniyor: "Hazirlaniyor", yolda: "Yolda", teslim: "Teslim Edildi" };
+  const durumRenk = {acik:C.accent,hazirlaniyor:"#e8a830",yolda:"#7b68ee",teslim:C.green};
+  const durumLabel = {acik:"Yeni",hazirlaniyor:"Hazirlaniyor",yolda:"Yolda",teslim:"Teslim Edildi"};
 
   return (
     <div className="fade-in" style={{ padding:16 }}>
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
-        <span style={{ fontFamily:"Syne", fontSize:20, fontWeight:700 }}>Paket Siparisler</span>
-        <Btn small onClick={() => setYeniModal(true)}>+ Yeni Siparis</Btn>
+      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+        <span style={{ fontFamily:"Syne",fontSize:20,fontWeight:700 }}>Paket Siparisler</span>
+        <Btn small onClick={()=>setYeniModal(true)}>+ Yeni Siparis</Btn>
       </div>
-
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:14 }}>
-        <Card><div style={{ fontSize:20, fontWeight:700, color:C.accent }}>{siparisler.length}</div><div style={{ fontSize:11, color:C.muted }}>Aktif</div></Card>
-        <Card><div style={{ fontSize:20, fontWeight:700, color:C.green }}>₺{siparisler.reduce((t,s)=>t+s.toplam,0).toLocaleString()}</div><div style={{ fontSize:11, color:C.muted }}>Toplam</div></Card>
+      <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14 }}>
+        <Card><div style={{ fontSize:20,fontWeight:700,color:C.accent }}>{siparisler.length}</div><div style={{ fontSize:11,color:C.muted }}>Aktif</div></Card>
+        <Card><div style={{ fontSize:20,fontWeight:700,color:C.green }}>₺{siparisler.reduce((t,s)=>t+s.toplam,0).toLocaleString()}</div><div style={{ fontSize:11,color:C.muted }}>Toplam</div></Card>
       </div>
-
-      <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-        {siparisler.map(s => (
+      <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
+        {siparisler.map(s=>(
           <Card key={s.id} style={{ border:"1px solid "+(durumRenk[s.durum]||C.border)+"44" }}>
-            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start" }}>
               <div>
-                <div style={{ fontWeight:700, fontSize:15 }}>{s.musteri_ad}</div>
-                {s.telefon && <div style={{ fontSize:12, color:C.muted }}>📞 {s.telefon}</div>}
-                {s.adres && <div style={{ fontSize:12, color:C.muted }}>📍 {s.adres}</div>}
+                <div style={{ fontWeight:700,fontSize:15 }}>{s.musteri_ad}</div>
+                {s.telefon&&<div style={{ fontSize:12,color:C.muted }}>📞 {s.telefon}</div>}
+                {s.adres&&<div style={{ fontSize:12,color:C.muted }}>📍 {s.adres}</div>}
                 <div style={{ marginTop:4 }}><Badge color={durumRenk[s.durum]||C.muted}>{durumLabel[s.durum]||s.durum}</Badge></div>
               </div>
               <div style={{ textAlign:"right" }}>
-                <div style={{ fontFamily:"Syne", fontSize:18, fontWeight:700, color:C.accent }}>₺{s.toplam.toLocaleString()}</div>
-                <div style={{ fontSize:11, color:C.muted }}>{new Date(s.tarih).toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit"})}</div>
+                <div style={{ fontFamily:"Syne",fontSize:18,fontWeight:700,color:C.accent }}>₺{s.toplam.toLocaleString()}</div>
+                <div style={{ fontSize:11,color:C.muted }}>{new Date(s.tarih).toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit"})}</div>
               </div>
             </div>
-            <div style={{ display:"flex", gap:6, marginTop:10, flexWrap:"wrap" }}>
-              {s.durum === "acik" && <Btn small variant="ghost" style={{ background:"#e8a83022", color:"#e8a830" }} onClick={() => durumGuncelle(s.id,"hazirlaniyor")}>Hazirlanıyor</Btn>}
-              {s.durum === "hazirlaniyor" && <Btn small variant="ghost" style={{ background:"#7b68ee22", color:"#7b68ee" }} onClick={() => durumGuncelle(s.id,"yolda")}>Yola Cikti</Btn>}
-              {s.durum === "yolda" && <Btn small variant="success" onClick={() => durumGuncelle(s.id,"teslim")}>Teslim Edildi</Btn>}
-              <Btn small variant="ghost" onClick={() => setDetayId(s.id===detayId?null:s.id)}>Detay</Btn>
+            <div style={{ display:"flex",gap:6,marginTop:10,flexWrap:"wrap" }}>
+              {s.durum==="acik"&&<Btn small variant="ghost" style={{ background:"#e8a83022",color:"#e8a830" }} onClick={()=>durumGuncelle(s.id,"hazirlaniyor")}>Hazirlaniyor</Btn>}
+              {s.durum==="hazirlaniyor"&&<Btn small variant="ghost" style={{ background:"#7b68ee22",color:"#7b68ee" }} onClick={()=>durumGuncelle(s.id,"yolda")}>Yola Cikti</Btn>}
+              {s.durum==="yolda"&&<Btn small variant="success" onClick={()=>durumGuncelle(s.id,"teslim")}>Teslim Edildi</Btn>}
+              <Btn small variant="ghost" onClick={()=>setDetayId(s.id===detayId?null:s.id)}>Detay</Btn>
             </div>
-            {detayId === s.id && (
-              <div style={{ marginTop:10, borderTop:"1px solid "+C.border, paddingTop:10 }}>
-                {(s.items||[]).map((item,i) => (
-                  <div key={i} style={{ display:"flex", justifyContent:"space-between", fontSize:13, padding:"3px 0" }}>
-                    <span>{item.ad} x{item.qty}</span>
-                    <span style={{ color:C.accent }}>₺{(item.fiyat*item.qty).toFixed(0)}</span>
-                  </div>
-                ))}
-                {s.not && <div style={{ fontSize:12, color:C.muted, marginTop:6 }}>Not: {s.not}</div>}
+            {detayId===s.id&&(
+              <div style={{ marginTop:10,borderTop:"1px solid "+C.border,paddingTop:10 }}>
+                {(s.items||[]).map((item,i)=><div key={i} style={{ display:"flex",justifyContent:"space-between",fontSize:13,padding:"3px 0" }}><span>{item.ad} x{item.qty}</span><span style={{ color:C.accent }}>₺{(item.fiyat*item.qty).toFixed(0)}</span></div>)}
+                {s.not&&<div style={{ fontSize:12,color:C.muted,marginTop:6 }}>Not: {s.not}</div>}
               </div>
             )}
           </Card>
         ))}
-        {siparisler.length === 0 && (
-          <div style={{ color:C.muted, textAlign:"center", padding:40 }}>
-            <div style={{ fontSize:40, marginBottom:8 }}>🛵</div>
-            Aktif paket siparis yok
-          </div>
-        )}
+        {siparisler.length===0&&<div style={{ color:C.muted,textAlign:"center",padding:40 }}><div style={{ fontSize:40,marginBottom:8 }}>🛵</div>Aktif paket siparis yok</div>}
       </div>
-
-      {yeniModal && (
-        <Modal title="Yeni Paket Siparis" onClose={() => { setYeniModal(false); setSepet([]); }}>
-          <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+      {yeniModal&&(
+        <Modal title="Yeni Paket Siparis" onClose={()=>{setYeniModal(false);setSepet([]);}}>
+          <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
             <input placeholder="Musteri adi *" value={form.musteri} onChange={e=>setForm({...form,musteri:e.target.value})} />
             <input placeholder="Telefon" value={form.telefon} onChange={e=>setForm({...form,telefon:e.target.value})} />
             <input placeholder="Adres" value={form.adres} onChange={e=>setForm({...form,adres:e.target.value})} />
-            <input placeholder="Siparis notu" value={form.not} onChange={e=>setForm({...form,not:e.target.value})} />
-            <div style={{ fontSize:13, color:C.muted, marginTop:4 }}>Urunler:</div>
-            <div style={{ display:"flex", gap:6, overflowX:"auto", paddingBottom:4 }}>
-              {[{id:"tum",ad:"Tumu"}, ...kategoriler].map(k=>(
-                <button key={k.id} onClick={()=>setAktifKat(k.id)}
-                  style={{ background:aktifKat===k.id?C.accent:C.card, color:aktifKat===k.id?"#000":"#fff", border:"1px solid "+(aktifKat===k.id?C.accent:C.border), borderRadius:20, padding:"4px 12px", fontSize:12, cursor:"pointer", whiteSpace:"nowrap" }}>
-                  {k.ad}
-                </button>
-              ))}
+            <input placeholder="Not" value={form.not} onChange={e=>setForm({...form,not:e.target.value})} />
+            <div style={{ fontSize:13,color:C.muted }}>Urunler:</div>
+            <div style={{ display:"flex",gap:6,overflowX:"auto",paddingBottom:4 }}>
+              {[{id:"tum",ad:"Tumu"},...kategoriler].map(k=><button key={k.id} onClick={()=>setAktifKat(k.id)} style={{ background:aktifKat===k.id?C.accent:C.card,color:aktifKat===k.id?"#000":"#fff",border:"1px solid "+(aktifKat===k.id?C.accent:C.border),borderRadius:20,padding:"4px 12px",fontSize:12,cursor:"pointer",whiteSpace:"nowrap" }}>{k.ad}</button>)}
             </div>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, maxHeight:200, overflowY:"auto" }}>
-              {menu.filter(m=>aktifKat==="tum"||m.kategori_id===aktifKat).map(m=>(
-                <div key={m.id} onClick={()=>sepetEkle(m)}
-                  style={{ background:C.surface, border:"1px solid "+C.border, borderRadius:10, padding:"8px 10px", cursor:"pointer" }}>
-                  <div style={{ fontWeight:600, fontSize:13 }}>{m.ad}</div>
-                  <div style={{ color:accent||C.accent, fontSize:12 }}>₺{m.fiyat}</div>
-                </div>
-              ))}
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,maxHeight:200,overflowY:"auto" }}>
+              {menu.filter(m=>aktifKat==="tum"||m.kategori_id===aktifKat).map(m=><div key={m.id} onClick={()=>sepetEkle(m)} style={{ background:C.surface,border:"1px solid "+C.border,borderRadius:10,padding:"8px 10px",cursor:"pointer" }}><div style={{ fontWeight:600,fontSize:13 }}>{m.ad}</div><div style={{ color:accent||C.accent,fontSize:12 }}>₺{m.fiyat}</div></div>)}
             </div>
-            {sepet.length > 0 && (
-              <div style={{ background:C.surface, borderRadius:10, padding:10 }}>
-                {sepet.map(item=>(
-                  <div key={item.menuId} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"4px 0" }}>
-                    <span style={{ fontSize:13 }}>{item.ad}</span>
-                    <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-                      <button onClick={()=>sepetCikar(item.menuId)} style={{ background:C.border,border:"none",color:C.text,borderRadius:4,width:22,height:22,cursor:"pointer",fontSize:12 }}>-</button>
-                      <span style={{ fontSize:13, fontWeight:600 }}>{item.qty}</span>
-                      <button onClick={()=>sepetEkle(menu.find(m=>m.id===item.menuId))} style={{ background:accent||C.accent,border:"none",color:"#000",borderRadius:4,width:22,height:22,cursor:"pointer",fontSize:12 }}>+</button>
-                    </div>
-                  </div>
-                ))}
-                <div style={{ fontFamily:"Syne", fontSize:18, fontWeight:700, marginTop:8, color:accent||C.accent }}>₺{sipToplam.toFixed(0)}</div>
-              </div>
-            )}
+            {sepet.length>0&&<div style={{ background:C.surface,borderRadius:10,padding:10 }}>
+              {sepet.map(item=><div key={item.menuId} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0" }}><span style={{ fontSize:13 }}>{item.ad}</span><div style={{ display:"flex",alignItems:"center",gap:6 }}><button onClick={()=>sepetCikar(item.menuId)} style={{ background:C.border,border:"none",color:C.text,borderRadius:4,width:22,height:22,cursor:"pointer",fontSize:12 }}>-</button><span style={{ fontSize:13,fontWeight:600 }}>{item.qty}</span><button onClick={()=>sepetEkle(menu.find(m=>m.id===item.menuId))} style={{ background:accent||C.accent,border:"none",color:"#000",borderRadius:4,width:22,height:22,cursor:"pointer",fontSize:12 }}>+</button></div></div>)}
+              <div style={{ fontFamily:"Syne",fontSize:18,fontWeight:700,marginTop:8,color:accent||C.accent }}>₺{sipToplam.toFixed(0)}</div>
+            </div>}
             <Btn onClick={siparisKaydet} disabled={!form.musteri||!sepet.length}>Siparis Olustur</Btn>
           </div>
         </Modal>
@@ -1590,126 +1494,98 @@ const PaketSiparis = ({ isletmeId, kullaniciId, menu, malzemeler, setMalzemeler,
 const Personel = ({ isletmeId }) => {
   const [personeller, setPersoneller] = useState([]);
   const [modal, setModal] = useState(false);
-  const [form, setForm] = useState({ ad: "", pozisyon: "", telefon: "", maas: "", baslangic: "" });
+  const [form, setForm] = useState({ ad:"", pozisyon:"", telefon:"", maas:"", baslangic:"" });
   const [detayId, setDetayId] = useState(null);
   const [vardiyaModal, setVardiyaModal] = useState(null);
-  const [vardiyaForm, setVardiyaForm] = useState({ tarih: new Date().toISOString().split("T")[0], giris: "", cikis: "", not: "" });
+  const [vardiyaForm, setVardiyaForm] = useState({ tarih:new Date().toISOString().split("T")[0], giris:"", cikis:"", not:"" });
 
   useEffect(() => { veriYukle(); }, []);
-
-  const veriYukle = async () => {
-    const { data } = await sb.from("personel").select("*, personel_vardiya(*)").eq("isletme_id", isletmeId).order("ad");
-    setPersoneller(data || []);
-  };
-
+  const veriYukle = async () => { const {data}=await sb.from("personel").select("*, personel_vardiya(*)").eq("isletme_id",isletmeId).order("ad"); setPersoneller(data||[]); };
   const kaydet = async () => {
-    if (!form.ad || !form.pozisyon) return;
-    const { data } = await sb.from("personel").insert({ ...form, maas: +form.maas || 0, isletme_id: isletmeId }).select("*, personel_vardiya(*)").single();
-    setPersoneller(p => [...p, data]);
-    setForm({ ad:"", pozisyon:"", telefon:"", maas:"", baslangic:"" });
-    setModal(false);
+    if (!form.ad||!form.pozisyon) return;
+    const {data}=await sb.from("personel").insert({...form,maas:+form.maas||0,isletme_id:isletmeId}).select("*, personel_vardiya(*)").single();
+    setPersoneller(p=>[...p,data]); setForm({ad:"",pozisyon:"",telefon:"",maas:"",baslangic:""}); setModal(false);
   };
-
-  const sil = async (id) => {
-    if (!window.confirm("Personeli silmek istediginize emin misiniz?")) return;
-    await sb.from("personel").delete().eq("id", id);
-    setPersoneller(p => p.filter(x=>x.id!==id));
-  };
-
+  const sil = async (id) => { if(!window.confirm("Personeli silmek istediginize emin misiniz?"))return; await sb.from("personel").delete().eq("id",id); setPersoneller(p=>p.filter(x=>x.id!==id)); };
   const vardiyaEkle = async () => {
-    if (!vardiyaForm.tarih || !vardiyaForm.giris) return;
-    const { data } = await sb.from("personel_vardiya").insert({ personel_id: vardiyaModal, ...vardiyaForm }).select().single();
-    setPersoneller(p => p.map(x => x.id===vardiyaModal ? {...x, personel_vardiya:[...(x.personel_vardiya||[]),data]} : x));
-    setVardiyaModal(null); setVardiyaForm({ tarih: new Date().toISOString().split("T")[0], giris:"", cikis:"", not:"" });
+    if (!vardiyaForm.tarih||!vardiyaForm.giris) return;
+    const {data}=await sb.from("personel_vardiya").insert({personel_id:vardiyaModal,...vardiyaForm}).select().single();
+    setPersoneller(p=>p.map(x=>x.id===vardiyaModal?{...x,personel_vardiya:[...(x.personel_vardiya||[]),data]}:x));
+    setVardiyaModal(null); setVardiyaForm({tarih:new Date().toISOString().split("T")[0],giris:"",cikis:"",not:""});
   };
-
-  const pozisyonRenk = { garson:C.accent, asci:C.green, kasiyer:"#7b68ee", temizlik:C.muted, yonetici:C.red, diger:C.muted };
+  const pozRenk = {garson:C.accent,asci:C.green,kasiyer:"#7b68ee",temizlik:C.muted,yonetici:C.red,diger:C.muted};
 
   return (
     <div className="fade-in" style={{ padding:16 }}>
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
-        <span style={{ fontFamily:"Syne", fontSize:20, fontWeight:700 }}>Personel</span>
-        <Btn small onClick={() => setModal(true)}>+ Personel Ekle</Btn>
+      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+        <span style={{ fontFamily:"Syne",fontSize:20,fontWeight:700 }}>Personel</span>
+        <Btn small onClick={()=>setModal(true)}>+ Personel Ekle</Btn>
       </div>
-
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:14 }}>
-        <Card><div style={{ fontSize:20, fontWeight:700, color:C.accent }}>{personeller.length}</div><div style={{ fontSize:11, color:C.muted }}>Toplam Personel</div></Card>
-        <Card><div style={{ fontSize:20, fontWeight:700, color:C.red }}>₺{personeller.reduce((t,p)=>t+(+p.maas||0),0).toLocaleString()}</div><div style={{ fontSize:11, color:C.muted }}>Toplam Maas</div></Card>
+      <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14 }}>
+        <Card><div style={{ fontSize:20,fontWeight:700,color:C.accent }}>{personeller.length}</div><div style={{ fontSize:11,color:C.muted }}>Toplam Personel</div></Card>
+        <Card><div style={{ fontSize:20,fontWeight:700,color:C.red }}>₺{personeller.reduce((t,p)=>t+(+p.maas||0),0).toLocaleString()}</div><div style={{ fontSize:11,color:C.muted }}>Toplam Maas</div></Card>
       </div>
-
-      <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-        {personeller.map(p => (
+      <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
+        {personeller.map(p=>(
           <Card key={p.id}>
-            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start" }}>
               <div>
-                <div style={{ fontWeight:700, fontSize:15 }}>{p.ad}</div>
-                <div style={{ display:"flex", gap:6, marginTop:4, flexWrap:"wrap" }}>
-                  <Badge color={pozisyonRenk[p.pozisyon]||C.muted}>{p.pozisyon}</Badge>
-                  {p.telefon && <span style={{ fontSize:12, color:C.muted }}>📞 {p.telefon}</span>}
+                <div style={{ fontWeight:700,fontSize:15 }}>{p.ad}</div>
+                <div style={{ display:"flex",gap:6,marginTop:4,flexWrap:"wrap" }}>
+                  <Badge color={pozRenk[p.pozisyon]||C.muted}>{p.pozisyon}</Badge>
+                  {p.telefon&&<span style={{ fontSize:12,color:C.muted }}>📞 {p.telefon}</span>}
                 </div>
-                {p.baslangic && <div style={{ fontSize:12, color:C.muted, marginTop:4 }}>Baslangic: {new Date(p.baslangic).toLocaleDateString("tr-TR")}</div>}
+                {p.baslangic&&<div style={{ fontSize:12,color:C.muted,marginTop:4 }}>Baslangic: {new Date(p.baslangic).toLocaleDateString("tr-TR")}</div>}
               </div>
-              <div style={{ textAlign:"right" }}>
-                <div style={{ fontWeight:700, color:C.green }}>₺{(+p.maas||0).toLocaleString()}</div>
-                <div style={{ fontSize:11, color:C.muted }}>aylik</div>
-              </div>
+              <div style={{ textAlign:"right" }}><div style={{ fontWeight:700,color:C.green }}>₺{(+p.maas||0).toLocaleString()}</div><div style={{ fontSize:11,color:C.muted }}>aylik</div></div>
             </div>
-            <div style={{ display:"flex", gap:6, marginTop:10, flexWrap:"wrap" }}>
-              <Btn small variant="ghost" onClick={() => setVardiyaModal(p.id)}>+ Vardiya</Btn>
-              <Btn small variant="ghost" onClick={() => setDetayId(p.id===detayId?null:p.id)}>Vardiyalar</Btn>
-              <Btn small variant="danger" onClick={() => sil(p.id)}>Sil</Btn>
+            <div style={{ display:"flex",gap:6,marginTop:10,flexWrap:"wrap" }}>
+              <Btn small variant="ghost" onClick={()=>setVardiyaModal(p.id)}>+ Vardiya</Btn>
+              <Btn small variant="ghost" onClick={()=>setDetayId(p.id===detayId?null:p.id)}>Vardiyalar</Btn>
+              <Btn small variant="danger" onClick={()=>sil(p.id)}>Sil</Btn>
             </div>
-            {detayId === p.id && (
-              <div style={{ marginTop:10, borderTop:"1px solid "+C.border, paddingTop:10 }}>
-                <div style={{ fontSize:12, color:C.muted, marginBottom:6 }}>Son Vardiyalar:</div>
-                {(p.personel_vardiya||[]).slice(-5).reverse().map((v,i) => (
-                  <div key={i} style={{ display:"flex", justifyContent:"space-between", fontSize:12, padding:"4px 0", borderBottom:"1px solid "+C.border }}>
+            {detayId===p.id&&(
+              <div style={{ marginTop:10,borderTop:"1px solid "+C.border,paddingTop:10 }}>
+                <div style={{ fontSize:12,color:C.muted,marginBottom:6 }}>Son Vardiyalar:</div>
+                {(p.personel_vardiya||[]).slice(-5).reverse().map((v,i)=>(
+                  <div key={i} style={{ display:"flex",justifyContent:"space-between",fontSize:12,padding:"4px 0",borderBottom:"1px solid "+C.border }}>
                     <span>{new Date(v.tarih).toLocaleDateString("tr-TR")}</span>
                     <span style={{ color:C.muted }}>{v.giris} - {v.cikis||"Devam"}</span>
                   </div>
                 ))}
-                {!(p.personel_vardiya||[]).length && <div style={{ color:C.muted, fontSize:12 }}>Vardiya kaydi yok</div>}
+                {!(p.personel_vardiya||[]).length&&<div style={{ color:C.muted,fontSize:12 }}>Vardiya kaydi yok</div>}
               </div>
             )}
           </Card>
         ))}
-        {personeller.length === 0 && (
-          <div style={{ color:C.muted, textAlign:"center", padding:40 }}>
-            <div style={{ fontSize:40, marginBottom:8 }}>👥</div>
-            Henuz personel eklenmedi
-          </div>
-        )}
+        {personeller.length===0&&<div style={{ color:C.muted,textAlign:"center",padding:40 }}><div style={{ fontSize:40,marginBottom:8 }}>👥</div>Henuz personel eklenmedi</div>}
       </div>
-
-      {modal && (
-        <Modal title="Yeni Personel" onClose={() => setModal(false)}>
-          <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+      {modal&&(
+        <Modal title="Yeni Personel" onClose={()=>setModal(false)}>
+          <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
             <input placeholder="Ad Soyad *" value={form.ad} onChange={e=>setForm({...form,ad:e.target.value})} />
             <select value={form.pozisyon} onChange={e=>setForm({...form,pozisyon:e.target.value})}>
               <option value="">Pozisyon sec *</option>
-              {["garson","asci","kasiyer","temizlik","yonetici","diger"].map(p=>(
-                <option key={p} value={p}>{p.charAt(0).toUpperCase()+p.slice(1)}</option>
-              ))}
+              {["garson","asci","kasiyer","temizlik","yonetici","diger"].map(p=><option key={p} value={p}>{p.charAt(0).toUpperCase()+p.slice(1)}</option>)}
             </select>
             <input placeholder="Telefon" value={form.telefon} onChange={e=>setForm({...form,telefon:e.target.value})} />
             <input type="number" placeholder="Aylik maas (₺)" value={form.maas} onChange={e=>setForm({...form,maas:e.target.value})} />
-            <div style={{ fontSize:12, color:C.muted }}>Baslangic tarihi:</div>
+            <div style={{ fontSize:12,color:C.muted }}>Baslangic tarihi:</div>
             <input type="date" value={form.baslangic} onChange={e=>setForm({...form,baslangic:e.target.value})} />
             <Btn onClick={kaydet} disabled={!form.ad||!form.pozisyon}>Kaydet</Btn>
           </div>
         </Modal>
       )}
-
-      {vardiyaModal && (
-        <Modal title="Vardiya Ekle" onClose={() => setVardiyaModal(null)}>
-          <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-            <div style={{ fontSize:12, color:C.muted }}>Tarih:</div>
+      {vardiyaModal&&(
+        <Modal title="Vardiya Ekle" onClose={()=>setVardiyaModal(null)}>
+          <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
+            <div style={{ fontSize:12,color:C.muted }}>Tarih:</div>
             <input type="date" value={vardiyaForm.tarih} onChange={e=>setVardiyaForm({...vardiyaForm,tarih:e.target.value})} />
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
               <input type="time" placeholder="Giris" value={vardiyaForm.giris} onChange={e=>setVardiyaForm({...vardiyaForm,giris:e.target.value})} />
               <input type="time" placeholder="Cikis" value={vardiyaForm.cikis} onChange={e=>setVardiyaForm({...vardiyaForm,cikis:e.target.value})} />
             </div>
-            <input placeholder="Not (istege bagli)" value={vardiyaForm.not} onChange={e=>setVardiyaForm({...vardiyaForm,not:e.target.value})} />
+            <input placeholder="Not" value={vardiyaForm.not} onChange={e=>setVardiyaForm({...vardiyaForm,not:e.target.value})} />
             <Btn onClick={vardiyaEkle} disabled={!vardiyaForm.giris}>Kaydet</Btn>
           </div>
         </Modal>
@@ -1726,8 +1602,10 @@ function App() {
   const [menu, setMenu] = useState([]);
   const [satislar, setSatislar] = useState([]);
   const [kategoriler, setKategoriler] = useState([]);
+  const [masraflar, setMasraflar] = useState([]);
   const [tema, setTema] = useState(function() { return localStorage.getItem("tema") || "dark"; });
   const [cevrimici, setCevrimici] = useState(navigator.onLine);
+  const [navAcik, setNavAcik] = useState(false);
 
   useEffect(() => {
     if (tema === "light") {
@@ -1777,13 +1655,14 @@ function App() {
 
   const veriYukle = async (isletmeId) => {
     try {
-      const [r1, r2, r3, r4] = await Promise.all([
+      const [r1, r2, r3, r4, r5] = await Promise.all([
         sb.from("malzemeler").select("*").eq("isletme_id", isletmeId),
         sb.from("menu").select("*").eq("isletme_id", isletmeId),
-        sb.from("satislar").select("*").eq("isletme_id", isletmeId).order("tarih", { ascending: false }).limit(100),
+        sb.from("satislar").select("*").eq("isletme_id", isletmeId).order("tarih", { ascending: false }).limit(200),
         sb.from("kategoriler").select("*").eq("isletme_id", isletmeId).order("sira"),
+        sb.from("masraflar").select("*").eq("isletme_id", isletmeId).order("tarih", { ascending: false }).limit(200),
       ]);
-      setMalzemeler(r1.data || []); setMenu(r2.data || []); setSatislar(r3.data || []); setKategoriler(r4.data || []);
+      setMalzemeler(r1.data || []); setMenu(r2.data || []); setSatislar(r3.data || []); setKategoriler(r4.data || []); setMasraflar(r5.data || []);
       localCache.set("malzemeler_" + isletmeId, r1.data || []);
       localCache.set("menu_" + isletmeId, r2.data || []);
       localCache.set("satislar_" + isletmeId, r3.data || []);
@@ -1811,48 +1690,125 @@ function App() {
   const accent = isletme ? (isletme.renk || C.accent) : C.accent;
   const dusukStok = malzemeler.filter(m => m.stok <= m.min_stok).length;
   const mudur = kullanici.rol === "mudur";
+  const erisim = erisimListesi(kullanici);
 
-  const nav = [
-    { id: "dashboard", icon: "📊", label: "Ozet" },
-    { id: "masalar", icon: "🪑", label: "Masalar" },
+  const tumNav = [
+    { id: "dashboard",  icon: "📊", label: "Ozet" },
+    { id: "masalar",    icon: "🪑", label: "Masalar" },
     { id: "malzemeler", icon: "📦", label: "Stok", badge: dusukStok },
+    { id: "menu",       icon: "🍔", label: "Menu" },
+    { id: "mutfak",     icon: "👨‍🍳", label: "Mutfak" },
+    { id: "paket",      icon: "🛵", label: "Paket" },
+    { id: "personel",   icon: "👥", label: "Personel" },
+    { id: "masraflar",  icon: "💸", label: "Masraf" },
+    { id: "qrmenu",     icon: "📱", label: "QR Menu" },
+    { id: "raporlar",   icon: "📈", label: "Raporlar" },
+    { id: "ayarlar",    icon: "⚙️", label: "Ayarlar" },
   ];
-  if (mudur) nav.push({ id: "menu", icon: "🍔", label: "Menu" });
-  if (mudur) nav.push({ id: "mutfak", icon: "👨‍🍳", label: "Mutfak" });
-  if (mudur) nav.push({ id: "paket", icon: "🛵", label: "Paket" });
-  if (mudur) nav.push({ id: "personel", icon: "👥", label: "Personel" });
-  if (mudur) nav.push({ id: "masraflar", icon: "💸", label: "Masraf" });
-  if (mudur) nav.push({ id: "qrmenu", icon: "📱", label: "QR" });
-  if (mudur) nav.push({ id: "raporlar", icon: "📈", label: "Rapor" });
-  nav.push({ id: "ayarlar", icon: "⚙️", label: "Ayarlar" });
+  const nav = tumNav.filter(n => erisim.includes(n.id));
+
+  const bgRenk = tema === "light" ? "#f5f5f0" : C.bg;
+  const surfaceRenk = tema === "light" ? "#ffffff" : C.surface;
+  const borderRenk = tema === "light" ? "#e0ddd8" : C.border;
+  const textRenk = tema === "light" ? "#1a1814" : C.text;
+
+  const aktifNavLabel = nav.find(n => n.id === sayfa)?.label || "";
 
   return (
-    <div style={{ maxWidth: 540, margin: "0 auto", minHeight: "100vh", background: tema==="light" ? "#f5f5f0" : C.bg, paddingBottom: 80 }}>
+    <div style={{ maxWidth: 540, margin: "0 auto", minHeight: "100vh", background: bgRenk, position: "relative" }}>
+
+      {/* Üst başlık çubuğu */}
+      <div style={{ position: "sticky", top: 0, zIndex: 50, background: surfaceRenk, borderBottom: `1px solid ${borderRenk}`, display: "flex", alignItems: "center", padding: "12px 16px", gap: 12 }}>
+        <button onClick={() => setNavAcik(true)}
+          style={{ background: "none", border: "none", display: "flex", flexDirection: "column", gap: 5, padding: 4, cursor: "pointer", position: "relative" }}>
+          <span style={{ display: "block", width: 22, height: 2, background: accent, borderRadius: 2 }} />
+          <span style={{ display: "block", width: 16, height: 2, background: accent, borderRadius: 2 }} />
+          <span style={{ display: "block", width: 22, height: 2, background: accent, borderRadius: 2 }} />
+          {dusukStok > 0 && <span style={{ position: "absolute", top: -2, right: -6, background: C.red, color: "#fff", borderRadius: "50%", width: 14, height: 14, fontSize: 9, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700 }}>{dusukStok}</span>}
+        </button>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontFamily: "Syne", fontSize: 16, fontWeight: 700, color: accent }}>{aktifNavLabel}</div>
+        </div>
+        {isletme?.logo_url && <img src={isletme.logo_url} style={{ width: 32, height: 32, borderRadius: 8, objectFit: "cover" }} />}
+      </div>
+
       {!cevrimici && (
-        <div style={{ background:"#e8a83022", borderBottom:"1px solid #e8a83044", color:"#e8a830", padding:"8px 16px", fontSize:13, textAlign:"center" }}>
+        <div style={{ background: "#e8a83022", borderBottom: "1px solid #e8a83044", color: "#e8a830", padding: "8px 16px", fontSize: 13, textAlign: "center" }}>
           Cevrimdisi - son kaydedilen veriler gosteriliyor
         </div>
       )}
-      {sayfa === "dashboard" && <Dashboard isletme={isletme} malzemeler={malzemeler} menu={menu} satislar={satislar} />}
-      {sayfa === "masalar" && <Masalar isletmeId={kullanici.isletme_id} kullaniciId={kullanici.id} menu={menu} malzemeler={malzemeler} setMalzemeler={setMalzemeler} setSatislar={setSatislar} accent={accent} kategoriler={kategoriler} />}
-      {sayfa === "malzemeler" && <Malzemeler isletmeId={kullanici.isletme_id} malzemeler={malzemeler} setMalzemeler={setMalzemeler} cevrimici={cevrimici} />}
-      {sayfa === "menu" && mudur && <MenuSayfasi isletmeId={kullanici.isletme_id} menu={menu} setMenu={setMenu} malzemeler={malzemeler} kategoriler={kategoriler} setKategoriler={setKategoriler} />}
-      {sayfa === "mutfak" && mudur && <MutfakEkrani isletmeId={kullanici.isletme_id} />}
-      {sayfa === "paket" && mudur && <PaketSiparis isletmeId={kullanici.isletme_id} kullaniciId={kullanici.id} menu={menu} malzemeler={malzemeler} setMalzemeler={setMalzemeler} setSatislar={setSatislar} accent={accent} kategoriler={kategoriler} />}
-      {sayfa === "personel" && mudur && <Personel isletmeId={kullanici.isletme_id} />}
-      {sayfa === "qrmenu" && mudur && <QRMenu isletme={isletme} menu={menu} kategoriler={kategoriler} />}
-      {sayfa === "raporlar" && mudur && <Raporlar satislar={satislar} menu={menu} malzemeler={malzemeler} isletme={isletme} />}
-      {sayfa === "ayarlar" && <Ayarlar kullanici={kullanici} tema={tema} setTema={setTema} setSatislar={setSatislar} />}
-      {sayfa === "masraflar" && mudur && <Masraflar isletmeId={kullanici.isletme_id} masraflar={masraflar} setMasraflar={setMasraflar} />}
-      <div style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:540, background: tema==="light" ? "#ffffff" : C.surface, borderTop:"1px solid " + (tema==="light"?"#e0ddd8":C.border), display:"flex", padding:"8px 0 12px" }}>
-        {nav.map(n => (
-          <button key={n.id} onClick={() => setSayfa(n.id)}
-            style={{ flex:1, background:"none", border:"none", display:"flex", flexDirection:"column", alignItems:"center", gap:2, cursor:"pointer", position:"relative" }}>
-            <span style={{ fontSize:20 }}>{n.icon}</span>
-            <span style={{ fontSize:11, color: sayfa===n.id ? accent : C.muted, fontWeight: sayfa===n.id ? 600:400 }}>{n.label}</span>
-            {n.badge > 0 && <span style={{ position:"absolute", top:0, right:"20%", background:C.red, color:"#fff", borderRadius:"50%", width:16, height:16, fontSize:10, display:"flex", alignItems:"center", justifyContent:"center", fontWeight:700 }}>{n.badge}</span>}
+
+      {/* İçerik */}
+      <div style={{ paddingBottom: 24 }}>
+        {sayfa === "dashboard"  && erisim.includes("dashboard")  && <Dashboard isletme={isletme} malzemeler={malzemeler} menu={menu} satislar={satislar} masraflar={masraflar} />}
+        {sayfa === "masalar"    && erisim.includes("masalar")    && <Masalar isletmeId={kullanici.isletme_id} kullaniciId={kullanici.id} menu={menu} malzemeler={malzemeler} setMalzemeler={setMalzemeler} setSatislar={setSatislar} accent={accent} kategoriler={kategoriler} />}
+        {sayfa === "malzemeler" && erisim.includes("malzemeler") && <Malzemeler isletmeId={kullanici.isletme_id} malzemeler={malzemeler} setMalzemeler={setMalzemeler} cevrimici={cevrimici} />}
+        {sayfa === "menu"       && erisim.includes("menu")       && <MenuSayfasi isletmeId={kullanici.isletme_id} menu={menu} setMenu={setMenu} malzemeler={malzemeler} kategoriler={kategoriler} setKategoriler={setKategoriler} />}
+        {sayfa === "mutfak"     && erisim.includes("mutfak")     && <MutfakEkrani isletmeId={kullanici.isletme_id} />}
+        {sayfa === "paket"      && erisim.includes("paket")      && <PaketSiparis isletmeId={kullanici.isletme_id} kullaniciId={kullanici.id} menu={menu} malzemeler={malzemeler} setMalzemeler={setMalzemeler} setSatislar={setSatislar} accent={accent} kategoriler={kategoriler} />}
+        {sayfa === "personel"   && erisim.includes("personel")   && <Personel isletmeId={kullanici.isletme_id} />}
+        {sayfa === "masraflar"  && erisim.includes("masraflar")  && <Masraflar isletmeId={kullanici.isletme_id} masraflar={masraflar} setMasraflar={setMasraflar} />}
+        {sayfa === "qrmenu"     && erisim.includes("qrmenu")     && <QRMenu isletme={isletme} menu={menu} kategoriler={kategoriler} />}
+        {sayfa === "raporlar"   && erisim.includes("raporlar")   && <Raporlar satislar={satislar} menu={menu} malzemeler={malzemeler} isletme={isletme} />}
+        {sayfa === "ayarlar"    && erisim.includes("ayarlar")    && <Ayarlar kullanici={kullanici} tema={tema} setTema={setTema} isletmeId={kullanici.isletme_id} setSatislar={setSatislar} />}
+      </div>
+
+      {/* Karartma overlay */}
+      {navAcik && (
+        <div onClick={() => setNavAcik(false)}
+          style={{ position: "fixed", inset: 0, background: "#000000aa", zIndex: 90, transition: "opacity 0.25s" }} />
+      )}
+
+      {/* Yan drawer */}
+      <div style={{
+        position: "fixed", top: 0, left: 0, height: "100vh", width: 260,
+        background: surfaceRenk, borderRight: `1px solid ${borderRenk}`,
+        zIndex: 100, transform: navAcik ? "translateX(0)" : "translateX(-100%)",
+        transition: "transform 0.28s cubic-bezier(.4,0,.2,1)",
+        display: "flex", flexDirection: "column", overflowY: "auto",
+      }}>
+        {/* Drawer başlık */}
+        <div style={{ padding: "20px 20px 16px", borderBottom: `1px solid ${borderRenk}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div>
+            <div style={{ fontFamily: "Syne", fontSize: 20, fontWeight: 800, color: accent }}>🍔 BurgerStock</div>
+            <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>{kullanici.email}</div>
+          </div>
+          <button onClick={() => setNavAcik(false)}
+            style={{ background: "none", border: "none", color: C.muted, fontSize: 20, padding: 4, lineHeight: 1, cursor: "pointer" }}>✕</button>
+        </div>
+
+        {/* Nav linkleri */}
+        <div style={{ flex: 1, padding: "12px 0" }}>
+          {nav.map(n => {
+            const aktif = sayfa === n.id;
+            return (
+              <button key={n.id}
+                onClick={() => { setSayfa(n.id); setNavAcik(false); }}
+                style={{
+                  width: "100%", background: aktif ? accent + "18" : "none",
+                  border: "none", borderLeft: aktif ? `3px solid ${accent}` : "3px solid transparent",
+                  display: "flex", alignItems: "center", gap: 14,
+                  padding: "13px 20px", cursor: "pointer", position: "relative",
+                  textAlign: "left",
+                }}>
+                <span style={{ fontSize: 20, lineHeight: 1 }}>{n.icon}</span>
+                <span style={{ fontSize: 15, fontWeight: aktif ? 700 : 400, color: aktif ? accent : textRenk }}>{n.label}</span>
+                {n.badge > 0 && (
+                  <span style={{ marginLeft: "auto", background: C.red, color: "#fff", borderRadius: 10, padding: "2px 7px", fontSize: 11, fontWeight: 700 }}>{n.badge}</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Drawer alt — kullanıcı bilgisi */}
+        <div style={{ padding: "16px 20px", borderTop: `1px solid ${borderRenk}` }}>
+          <div style={{ fontSize: 12, color: C.muted, marginBottom: 4 }}>{rolLabel(kullanici.rol, kullanici.rol_ad)}</div>
+          <button onClick={async () => { await sb.auth.signOut(); window.location.reload(); }}
+            style={{ background: C.red + "22", color: C.red, border: `1px solid ${C.red}44`, borderRadius: 8, padding: "8px 14px", fontSize: 13, cursor: "pointer", fontWeight: 500 }}>
+            Cikis Yap
           </button>
-        ))}
+        </div>
       </div>
     </div>
   );
