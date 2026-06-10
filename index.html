@@ -1824,7 +1824,7 @@ const SatinAlma = ({ isletmeId, malzemeler, setMalzemeler }) => {
     const { data } = await sb.from("satin_alma").insert({
       isletme_id: isletmeId,
       tedarikci: form.tedarikci,
-      not: form.not,
+      notlar: form.notlar,
       kalemler: form.kalemler,
       toplam,
       durum: "bekliyor",
