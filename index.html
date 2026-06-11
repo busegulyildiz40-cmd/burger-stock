@@ -1789,7 +1789,7 @@ const SatinAlma = ({ isletmeId, malzemeler, setMalzemeler }) => {
   const [siparisler, setSiparisler] = useState([]);
   const [modal, setModal] = useState(false);
   const [detayId, setDetayId] = useState(null);
-  const [form, setForm] = useState({ tedarikci:"", not:"", kalemler:[] });
+  const [form, setForm] = useState({ tedarikci:"", notlar:"", kalemler:[] });
   const [kalemForm, setKalemForm] = useState({ malzeme_id:"", miktar:"", birim_fiyat:"" });
   const [teslimModal, setTeslimModal] = useState(null);
   const [yukleniyor, setYukleniyor] = useState(true);
@@ -1831,7 +1831,7 @@ const SatinAlma = ({ isletmeId, malzemeler, setMalzemeler }) => {
       tarih: new Date().toISOString(),
     }).select().single();
     setSiparisler(s => [data, ...s]);
-    setForm({ tedarikci:"", not:"", kalemler:[] });
+    setForm({ tedarikci:"", notlar:"", kalemler:[] });
     setModal(false);
   };
 
@@ -1916,7 +1916,7 @@ const SatinAlma = ({ isletmeId, malzemeler, setMalzemeler }) => {
         <Modal title="Yeni Satın Alma" onClose={()=>{setModal(false);setForm({tedarikci:"",not:"",kalemler:[]});}}>
           <div style={{display:"flex",flexDirection:"column",gap:10}}>
             <input placeholder="Tedarikçi adı *" value={form.tedarikci} onChange={e=>setForm({...form,tedarikci:e.target.value})} />
-            <input placeholder="Not (isteğe bağlı)" value={form.not} onChange={e=>setForm({...form,not:e.target.value})} />
+            <input placeholder="Not (isteğe bağlı)" value={form.notlar} onChange={e=>setForm({...form,not:e.target.value})} />
             <div style={{fontSize:13,color:C.muted,marginTop:4}}>Kalemler:</div>
             <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr auto",gap:6,alignItems:"center"}}>
               <select value={kalemForm.malzeme_id} onChange={e=>setKalemForm({...kalemForm,malzeme_id:e.target.value})}>
