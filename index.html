@@ -8,7 +8,7 @@
   <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <script src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { background: #0f0e0c; color: #f0ebe3; font-family: 'DM Sans', sans-serif; }
@@ -33,7 +33,7 @@ const { useState, useEffect, useRef } = React;
 
 const SUPABASE_URL = 'https://kdqwmkbtflperskelnok.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtkcXdta2J0ZmxwZXJza2Vsbm9rIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk5OTM4ODcsImV4cCI6MjA5NTU2OTg4N30.R9nOtDtAVEaxbIROwx3G0HDHCPoBS79LJKjv9a_pkG8';
-const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const C = {
   bg: "#0f0e0c", surface: "#1a1814", card: "#201e1a", border: "#2e2b26",
