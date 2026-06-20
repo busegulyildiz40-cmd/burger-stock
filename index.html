@@ -2231,7 +2231,7 @@ Faturada net bilgi yoksa makul tahmin yap.` }
 const Gorevler = ({ isletmeId, personeller }) => {
   const [gorevler, setGorevler] = useState([]);
   const [modal, setModal] = useState(false);
-  const [form, setForm] = useState({ baslik:"", aciklama:"", personel_id:"", teslim_tarihi:"", oncelik:"normal" });
+  const [form, setForm] = useState({ baslik:"", aciklama:"", personel_id:"", teslim_tarihi:"", baslangic_saat:"", bitis_saat:"", oncelik:"normal" });
   const [filtre, setFiltre] = useState("tum");
   const [yukleniyor, setYukleniyor] = useState(true);
 
@@ -2249,10 +2249,11 @@ const Gorevler = ({ isletmeId, personeller }) => {
     const { data } = await sb.from("gorevler").insert({
       isletme_id: isletmeId, baslik: form.baslik, aciklama: form.aciklama,
       personel_id: form.personel_id || null, teslim_tarihi: form.teslim_tarihi || null,
+      baslangic_saat: form.baslangic_saat || null, bitis_saat: form.bitis_saat || null,
       oncelik: form.oncelik, durum: "yapilacak", created_at: new Date().toISOString(),
     }).select().single();
     setGorevler(g => [data, ...g]);
-    setForm({ baslik:"", aciklama:"", personel_id:"", teslim_tarihi:"", oncelik:"normal" });
+    setForm({ baslik:"", aciklama:"", personel_id:"", teslim_tarihi:"", baslangic_saat:"", bitis_saat:"", oncelik:"normal" });
     setModal(false);
   };
 
@@ -2313,6 +2314,11 @@ const Gorevler = ({ isletmeId, personeller }) => {
                     <Badge color={durumRenk[g.durum]}>{durumLabel[g.durum]}</Badge>
                     <span style={{fontSize:12,color:C.muted}}>👤 {personelAd(g.personel_id)}</span>
                     {g.teslim_tarihi && <span style={{fontSize:12,color:gecmisGorev(g)?C.red:C.muted}}>📅 {new Date(g.teslim_tarihi).toLocaleDateString("tr-TR")}</span>}
+                    {(g.baslangic_saat || g.bitis_saat) && (
+                      <span style={{fontSize:12,color:C.accent,fontWeight:600}}>
+                        🕐 {g.baslangic_saat||"?"} - {g.bitis_saat||"?"}
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -2339,6 +2345,17 @@ const Gorevler = ({ isletmeId, personeller }) => {
             </select>
             <div style={{fontSize:12,color:C.muted}}>Teslim tarihi (isteğe bağlı):</div>
             <input type="date" value={form.teslim_tarihi} onChange={e=>setForm({...form,teslim_tarihi:e.target.value})} />
+            <div style={{fontSize:12,color:C.muted}}>Saat aralığı (isteğe bağlı):</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+              <div>
+                <div style={{fontSize:11,color:C.muted,marginBottom:4}}>Başlangıç</div>
+                <input type="time" value={form.baslangic_saat} onChange={e=>setForm({...form,baslangic_saat:e.target.value})} />
+              </div>
+              <div>
+                <div style={{fontSize:11,color:C.muted,marginBottom:4}}>Bitiş</div>
+                <input type="time" value={form.bitis_saat} onChange={e=>setForm({...form,bitis_saat:e.target.value})} />
+              </div>
+            </div>
             <div style={{fontSize:12,color:C.muted}}>Öncelik:</div>
             <div style={{display:"flex",gap:8}}>
               {["dusuk","normal","yuksek"].map(o=>(
