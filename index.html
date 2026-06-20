@@ -9,6 +9,7 @@
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
   <script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { background: #0f0e0c; color: #f0ebe3; font-family: 'DM Sans', sans-serif; }
@@ -101,10 +102,13 @@ const TUM_SAYFALAR = [
   { id: "raporlar",    label: "Raporlar" },
   { id: "fatura",      label: "Faturalar" },
   { id: "satinalma",   label: "Satın Alma" },
+  { id: "gorevler",    label: "Görevler" },
+  { id: "vardiya",     label: "Vardiya" },
+  { id: "mesai",       label: "Mesai Girişi" },
 ];
 
 const ROL_ERISIM = {
-  mudur:       ["dashboard","masalar","malzemeler","menu","mutfak","paket","personel","masraflar","fatura","satinalma","qrmenu","raporlar","ayarlar"],
+  mudur:       ["dashboard","masalar","malzemeler","menu","mutfak","paket","personel","gorevler","vardiya","mesai","masraflar","fatura","satinalma","qrmenu","raporlar","ayarlar"],
   kasiyer:     ["dashboard","masalar","malzemeler","ayarlar"],
   garson:      ["dashboard","masalar","ayarlar"],
   mutfak:      ["mutfak","ayarlar"],
@@ -2223,7 +2227,485 @@ Faturada net bilgi yoksa makul tahmin yap.` }
 };
 
 
+// ── GÖREVLER ──────────────────────────────────────────────────────────────────
+const Gorevler = ({ isletmeId, personeller }) => {
+  const [gorevler, setGorevler] = useState([]);
+  const [modal, setModal] = useState(false);
+  const [form, setForm] = useState({ baslik:"", aciklama:"", personel_id:"", teslim_tarihi:"", oncelik:"normal" });
+  const [filtre, setFiltre] = useState("tum");
+  const [yukleniyor, setYukleniyor] = useState(true);
+
+  useEffect(() => { veriYukle(); }, []);
+
+  const veriYukle = async () => {
+    setYukleniyor(true);
+    const { data } = await sb.from("gorevler").select("*").eq("isletme_id", isletmeId).order("created_at", {ascending:false});
+    setGorevler(data || []);
+    setYukleniyor(false);
+  };
+
+  const kaydet = async () => {
+    if (!form.baslik) return;
+    const { data } = await sb.from("gorevler").insert({
+      isletme_id: isletmeId, baslik: form.baslik, aciklama: form.aciklama,
+      personel_id: form.personel_id || null, teslim_tarihi: form.teslim_tarihi || null,
+      oncelik: form.oncelik, durum: "yapilacak", created_at: new Date().toISOString(),
+    }).select().single();
+    setGorevler(g => [data, ...g]);
+    setForm({ baslik:"", aciklama:"", personel_id:"", teslim_tarihi:"", oncelik:"normal" });
+    setModal(false);
+  };
+
+  const durumDegistir = async (id, durum) => {
+    await sb.from("gorevler").update({ durum, tamamlanma_tarihi: durum==="tamamlandi" ? new Date().toISOString() : null }).eq("id", id);
+    setGorevler(g => g.map(x => x.id===id ? {...x, durum} : x));
+  };
+
+  const sil = async (id) => {
+    if (!window.confirm("Bu görevi silmek istediğinize emin misiniz?")) return;
+    await sb.from("gorevler").delete().eq("id", id);
+    setGorevler(g => g.filter(x => x.id !== id));
+  };
+
+  const personelAd = (id) => personeller.find(p=>p.id===id)?.ad || "Atanmamış";
+  const oncelikRenk = { dusuk:C.muted, normal:C.accent, yuksek:C.red };
+  const oncelikLabel = { dusuk:"Düşük", normal:"Normal", yuksek:"Yüksek" };
+  const durumRenk = { yapilacak:C.muted, devam_ediyor:"#7b68ee", tamamlandi:C.green };
+  const durumLabel = { yapilacak:"Yapılacak", devam_ediyor:"Devam Ediyor", tamamlandi:"Tamamlandı" };
+
+  const filtreli = filtre==="tum" ? gorevler
+    : filtre==="aktif" ? gorevler.filter(g=>g.durum!=="tamamlandi")
+    : gorevler.filter(g=>g.durum==="tamamlandi");
+
+  const gecmisGorev = (g) => g.teslim_tarihi && new Date(g.teslim_tarihi) < new Date() && g.durum !== "tamamlandi";
+
+  return (
+    <div className="fade-in" style={{padding:16}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+        <span style={{fontFamily:"Syne",fontSize:20,fontWeight:700}}>Görevler</span>
+        <Btn small onClick={()=>setModal(true)}>+ Görev Ata</Btn>
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:14}}>
+        <Card><div style={{fontSize:18,fontWeight:700,color:C.muted}}>{gorevler.filter(g=>g.durum==="yapilacak").length}</div><div style={{fontSize:10,color:C.muted}}>Yapılacak</div></Card>
+        <Card><div style={{fontSize:18,fontWeight:700,color:"#7b68ee"}}>{gorevler.filter(g=>g.durum==="devam_ediyor").length}</div><div style={{fontSize:10,color:C.muted}}>Devam Ediyor</div></Card>
+        <Card><div style={{fontSize:18,fontWeight:700,color:C.green}}>{gorevler.filter(g=>g.durum==="tamamlandi").length}</div><div style={{fontSize:10,color:C.muted}}>Tamamlandı</div></Card>
+      </div>
+
+      <div style={{display:"flex",gap:8,marginBottom:14}}>
+        {[["tum","Tümü"],["aktif","Aktif"],["tamamlanan","Tamamlanan"]].map(([k,l])=>(
+          <button key={k} onClick={()=>setFiltre(k)} style={{background:filtre===k?C.accent:C.card,color:filtre===k?"#000":"#fff",border:"1px solid "+(filtre===k?C.accent:C.border),borderRadius:20,padding:"6px 14px",fontSize:12,cursor:"pointer"}}>{l}</button>
+        ))}
+      </div>
+
+      {yukleniyor ? <Spinner/> : (
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          {filtreli.map(g=>(
+            <Card key={g.id} style={{border: gecmisGorev(g) ? `1px solid ${C.red}44` : (g.durum==="tamamlandi" ? `1px solid ${C.green}33` : undefined)}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                <div style={{flex:1}}>
+                  <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:4}}>
+                    <div style={{width:8,height:8,borderRadius:"50%",background:oncelikRenk[g.oncelik]||C.muted,flexShrink:0}} />
+                    <div style={{fontWeight:700,fontSize:15,textDecoration:g.durum==="tamamlandi"?"line-through":"none",color:g.durum==="tamamlandi"?C.muted:C.text}}>{g.baslik}</div>
+                  </div>
+                  {g.aciklama && <div style={{fontSize:13,color:C.muted,marginBottom:6}}>{g.aciklama}</div>}
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+                    <Badge color={durumRenk[g.durum]}>{durumLabel[g.durum]}</Badge>
+                    <span style={{fontSize:12,color:C.muted}}>👤 {personelAd(g.personel_id)}</span>
+                    {g.teslim_tarihi && <span style={{fontSize:12,color:gecmisGorev(g)?C.red:C.muted}}>📅 {new Date(g.teslim_tarihi).toLocaleDateString("tr-TR")}</span>}
+                  </div>
+                </div>
+              </div>
+              <div style={{display:"flex",gap:6,marginTop:10,flexWrap:"wrap"}}>
+                {g.durum==="yapilacak" && <Btn small variant="ghost" style={{background:"#7b68ee22",color:"#7b68ee"}} onClick={()=>durumDegistir(g.id,"devam_ediyor")}>Başlat</Btn>}
+                {g.durum==="devam_ediyor" && <Btn small variant="success" onClick={()=>durumDegistir(g.id,"tamamlandi")}>Tamamla</Btn>}
+                {g.durum==="tamamlandi" && <Btn small variant="ghost" onClick={()=>durumDegistir(g.id,"yapilacak")}>Geri Al</Btn>}
+                <Btn small variant="danger" onClick={()=>sil(g.id)}>Sil</Btn>
+              </div>
+            </Card>
+          ))}
+          {!filtreli.length && <div style={{color:C.muted,textAlign:"center",padding:40}}><div style={{fontSize:36,marginBottom:8}}>✅</div>Görev bulunamadı</div>}
+        </div>
+      )}
+
+      {modal && (
+        <Modal title="Yeni Görev Ata" onClose={()=>setModal(false)}>
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            <input placeholder="Görev başlığı *" value={form.baslik} onChange={e=>setForm({...form,baslik:e.target.value})} />
+            <input placeholder="Açıklama (isteğe bağlı)" value={form.aciklama} onChange={e=>setForm({...form,aciklama:e.target.value})} />
+            <select value={form.personel_id} onChange={e=>setForm({...form,personel_id:e.target.value})}>
+              <option value="">Personel seç (isteğe bağlı)</option>
+              {personeller.map(p=><option key={p.id} value={p.id}>{p.ad}</option>)}
+            </select>
+            <div style={{fontSize:12,color:C.muted}}>Teslim tarihi (isteğe bağlı):</div>
+            <input type="date" value={form.teslim_tarihi} onChange={e=>setForm({...form,teslim_tarihi:e.target.value})} />
+            <div style={{fontSize:12,color:C.muted}}>Öncelik:</div>
+            <div style={{display:"flex",gap:8}}>
+              {["dusuk","normal","yuksek"].map(o=>(
+                <button key={o} onClick={()=>setForm({...form,oncelik:o})}
+                  style={{flex:1,background:form.oncelik===o?oncelikRenk[o]+"22":C.card,color:form.oncelik===o?oncelikRenk[o]:C.muted,border:"1px solid "+(form.oncelik===o?oncelikRenk[o]:C.border),borderRadius:8,padding:"8px 0",fontSize:12,cursor:"pointer",fontWeight:600}}>
+                  {oncelikLabel[o]}
+                </button>
+              ))}
+            </div>
+            <Btn onClick={kaydet} disabled={!form.baslik}>Görev Ata</Btn>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+};
+
+// ── VARDİYA PLANI (SHIFT) ─────────────────────────────────────────────────────
+const VardiyaPlani = ({ isletmeId, personeller }) => {
+  const [vardiyalar, setVardiyalar] = useState([]);
+  const [gorunum, setGorunum] = useState("takvim"); // takvim | liste
+  const [modal, setModal] = useState(false);
+  const [form, setForm] = useState({ personel_id:"", tarih:new Date().toISOString().split("T")[0], baslangic:"09:00", bitis:"18:00", not:"" });
+  const [haftaOfset, setHaftaOfset] = useState(0);
+  const [yukleniyor, setYukleniyor] = useState(true);
+
+  useEffect(() => { veriYukle(); }, []);
+
+  const veriYukle = async () => {
+    setYukleniyor(true);
+    const { data } = await sb.from("shift_plani").select("*").eq("isletme_id", isletmeId).order("tarih");
+    setVardiyalar(data || []);
+    setYukleniyor(false);
+  };
+
+  const kaydet = async () => {
+    if (!form.personel_id || !form.tarih || !form.baslangic) return;
+    const { data } = await sb.from("shift_plani").insert({
+      isletme_id: isletmeId, personel_id: +form.personel_id, tarih: form.tarih,
+      baslangic: form.baslangic, bitis: form.bitis, not: form.not,
+    }).select().single();
+    setVardiyalar(v => [...v, data]);
+    setModal(false);
+    setForm({ personel_id:"", tarih:new Date().toISOString().split("T")[0], baslangic:"09:00", bitis:"18:00", not:"" });
+  };
+
+  const sil = async (id) => {
+    if (!window.confirm("Bu vardiyayı silmek istediğinize emin misiniz?")) return;
+    await sb.from("shift_plani").delete().eq("id", id);
+    setVardiyalar(v => v.filter(x => x.id !== id));
+  };
+
+  const personelAd = (id) => personeller.find(p=>p.id===id)?.ad || "?";
+  const personelRenk = (id) => {
+    const renkler = ["#f5a623","#52c97a","#7b68ee","#e05252","#30c8e8","#e8a830"];
+    const idx = personeller.findIndex(p=>p.id===id);
+    return renkler[idx % renkler.length] || C.muted;
+  };
+
+  // Haftanın günlerini hesapla
+  const bugun = new Date();
+  const haftaBaslangic = new Date(bugun);
+  const gun = haftaBaslangic.getDay();
+  haftaBaslangic.setDate(haftaBaslangic.getDate() + (gun===0?-6:1-gun) + haftaOfset*7);
+  haftaBaslangic.setHours(0,0,0,0);
+  const haftaGunleri = [...Array(7)].map((_,i) => {
+    const d = new Date(haftaBaslangic); d.setDate(d.getDate()+i);
+    return d;
+  });
+  const gunAdlari = ["Pzt","Sal","Çar","Per","Cum","Cmt","Paz"];
+
+  const vardiyaBul = (tarihStr, personelId) => vardiyalar.filter(v => v.tarih===tarihStr && v.personel_id===personelId);
+
+  return (
+    <div className="fade-in" style={{padding:16}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+        <span style={{fontFamily:"Syne",fontSize:20,fontWeight:700}}>Vardiya Planı</span>
+        <Btn small onClick={()=>setModal(true)}>+ Vardiya Ekle</Btn>
+      </div>
+
+      <div style={{display:"flex",gap:8,marginBottom:14}}>
+        {[["takvim","Takvim"],["liste","Liste"]].map(([k,l])=>(
+          <button key={k} onClick={()=>setGorunum(k)} style={{background:gorunum===k?C.accent:C.card,color:gorunum===k?"#000":"#fff",border:"1px solid "+(gorunum===k?C.accent:C.border),borderRadius:20,padding:"6px 16px",fontSize:13,cursor:"pointer"}}>{l}</button>
+        ))}
+      </div>
+
+      {yukleniyor ? <Spinner/> : gorunum==="takvim" ? (
+        <div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+            <Btn small variant="ghost" onClick={()=>setHaftaOfset(o=>o-1)}>← Önceki</Btn>
+            <span style={{fontSize:13,color:C.muted,fontWeight:600}}>
+              {haftaGunleri[0].toLocaleDateString("tr-TR",{day:"2-digit",month:"2-digit"})} - {haftaGunleri[6].toLocaleDateString("tr-TR",{day:"2-digit",month:"2-digit"})}
+            </span>
+            <Btn small variant="ghost" onClick={()=>setHaftaOfset(o=>o+1)}>Sonraki →</Btn>
+          </div>
+
+          <div style={{overflowX:"auto"}}>
+            <div style={{minWidth:600}}>
+              {/* Gün başlıkları */}
+              <div style={{display:"grid",gridTemplateColumns:"100px repeat(7,1fr)",gap:4,marginBottom:6}}>
+                <div></div>
+                {haftaGunleri.map((d,i)=>{
+                  const bugunMu = d.toDateString()===new Date().toDateString();
+                  return (
+                    <div key={i} style={{textAlign:"center",padding:"6px 0",borderRadius:8,background:bugunMu?C.accent+"22":"transparent"}}>
+                      <div style={{fontSize:11,color:bugunMu?C.accent:C.muted,fontWeight:600}}>{gunAdlari[i]}</div>
+                      <div style={{fontSize:13,fontWeight:700,color:bugunMu?C.accent:C.text}}>{d.getDate()}</div>
+                    </div>
+                  );
+                })}
+              </div>
+              {/* Personel satırları */}
+              {personeller.map(p=>(
+                <div key={p.id} style={{display:"grid",gridTemplateColumns:"100px repeat(7,1fr)",gap:4,marginBottom:4,alignItems:"stretch"}}>
+                  <div style={{fontSize:12,fontWeight:600,display:"flex",alignItems:"center",paddingLeft:4,color:personelRenk(p.id)}}>{p.ad.split(" ")[0]}</div>
+                  {haftaGunleri.map((d,i)=>{
+                    const tarihStr = d.toISOString().split("T")[0];
+                    const vlist = vardiyaBul(tarihStr, p.id);
+                    return (
+                      <div key={i} style={{minHeight:40,background:C.card,borderRadius:6,padding:2,display:"flex",flexDirection:"column",gap:2}}>
+                        {vlist.map(v=>(
+                          <div key={v.id} onClick={()=>sil(v.id)} title="Silmek için tıkla"
+                            style={{background:personelRenk(p.id)+"33",borderRadius:4,padding:"2px 4px",fontSize:9,color:personelRenk(p.id),fontWeight:700,cursor:"pointer",textAlign:"center"}}>
+                            {v.baslangic}-{v.bitis}
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          </div>
+          {!personeller.length && <div style={{color:C.muted,textAlign:"center",padding:30}}>Önce personel ekleyin</div>}
+        </div>
+      ) : (
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {[...vardiyalar].sort((a,b)=>new Date(b.tarih)-new Date(a.tarih)).map(v=>(
+            <Card key={v.id}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div>
+                  <div style={{fontWeight:700,fontSize:14,color:personelRenk(v.personel_id)}}>{personelAd(v.personel_id)}</div>
+                  <div style={{fontSize:12,color:C.muted,marginTop:2}}>{new Date(v.tarih).toLocaleDateString("tr-TR",{weekday:"long",day:"2-digit",month:"2-digit"})}</div>
+                  {v.not && <div style={{fontSize:11,color:C.muted,marginTop:2}}>{v.not}</div>}
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <Badge color={C.accent}>{v.baslangic} - {v.bitis}</Badge>
+                  <Btn small variant="danger" onClick={()=>sil(v.id)}>Sil</Btn>
+                </div>
+              </div>
+            </Card>
+          ))}
+          {!vardiyalar.length && <div style={{color:C.muted,textAlign:"center",padding:40}}>Henüz vardiya planlanmadı</div>}
+        </div>
+      )}
+
+      {modal && (
+        <Modal title="Vardiya Ekle" onClose={()=>setModal(false)}>
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            <select value={form.personel_id} onChange={e=>setForm({...form,personel_id:e.target.value})}>
+              <option value="">Personel seç *</option>
+              {personeller.map(p=><option key={p.id} value={p.id}>{p.ad}</option>)}
+            </select>
+            <input type="date" value={form.tarih} onChange={e=>setForm({...form,tarih:e.target.value})} />
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+              <div>
+                <div style={{fontSize:11,color:C.muted,marginBottom:4}}>Başlangıç</div>
+                <input type="time" value={form.baslangic} onChange={e=>setForm({...form,baslangic:e.target.value})} />
+              </div>
+              <div>
+                <div style={{fontSize:11,color:C.muted,marginBottom:4}}>Bitiş</div>
+                <input type="time" value={form.bitis} onChange={e=>setForm({...form,bitis:e.target.value})} />
+              </div>
+            </div>
+            <input placeholder="Not (isteğe bağlı)" value={form.not} onChange={e=>setForm({...form,not:e.target.value})} />
+            <Btn onClick={kaydet} disabled={!form.personel_id||!form.tarih}>Vardiya Ekle</Btn>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+};
+
+// ── MESAİ GİRİŞ EKRANI (ORTAK TABLET — SÜREKLİ YENİLENEN QR) ─────────────────
+const MesaiEkrani = ({ isletmeId, isletmeAd, accent }) => {
+  const [qrDataUrl, setQrDataUrl] = useState(null);
+  const [token, setToken] = useState(null);
+  const [saniye, setSaniye] = useState(30);
+  const [sonGirisler, setSonGirisler] = useState([]);
+  const SURE = 30; // saniye
+
+  const tokenUret = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
+
+  const yeniQrUret = async () => {
+    const yeniToken = tokenUret();
+    const expiresAt = new Date(Date.now() + SURE*1000).toISOString();
+    await sb.from("mesai_tokens").insert({ isletme_id: isletmeId, token: yeniToken, expires_at: expiresAt });
+    setToken(yeniToken);
+    const url = window.location.origin + window.location.pathname + "?mesai=" + yeniToken + "&isletme=" + isletmeId;
+    const dataUrl = await QRCode.toDataURL(url, { width: 280, margin: 2, color: { dark: "#000000", light: "#ffffff" } });
+    setQrDataUrl(dataUrl);
+    setSaniye(SURE);
+  };
+
+  useEffect(() => {
+    yeniQrUret();
+    const interval = setInterval(() => {
+      setSaniye(s => {
+        if (s <= 1) { yeniQrUret(); return SURE; }
+        return s - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    sonGirisleriYukle();
+    const interval = setInterval(sonGirisleriYukle, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const sonGirisleriYukle = async () => {
+    const bugunBaslangic = new Date(); bugunBaslangic.setHours(0,0,0,0);
+    const { data } = await sb.from("mesai_kayitlari").select("*, personel(ad)").eq("isletme_id", isletmeId)
+      .gte("zaman", bugunBaslangic.toISOString()).order("zaman", {ascending:false}).limit(10);
+    setSonGirisler(data || []);
+  };
+
+  return (
+    <div className="fade-in" style={{padding:16,display:"flex",flexDirection:"column",alignItems:"center",gap:20}}>
+      <div style={{textAlign:"center"}}>
+        <div style={{fontFamily:"Syne",fontSize:24,fontWeight:800,color:accent}}>⏱️ Mesai Girişi</div>
+        <div style={{fontSize:13,color:C.muted,marginTop:4}}>{isletmeAd}</div>
+      </div>
+
+      <Card style={{padding:24,display:"flex",flexDirection:"column",alignItems:"center",gap:14,width:"100%",maxWidth:340}}>
+        {qrDataUrl ? (
+          <img src={qrDataUrl} style={{width:"100%",maxWidth:260,borderRadius:12,background:"#fff",padding:8}} />
+        ) : <Spinner/>}
+        <div style={{display:"flex",alignItems:"center",gap:8,width:"100%"}}>
+          <div style={{flex:1,height:6,background:C.border,borderRadius:3,overflow:"hidden"}}>
+            <div style={{width:(saniye/SURE*100)+"%",height:"100%",background:accent,borderRadius:3,transition:"width 1s linear"}} />
+          </div>
+          <span style={{fontSize:12,color:C.muted,fontWeight:600,minWidth:30}}>{saniye}s</span>
+        </div>
+        <div style={{fontSize:12,color:C.muted,textAlign:"center"}}>QR kod {SURE} saniyede bir yenilenir.<br/>Telefonunuzla okutup mesai giriş/çıkış yapın.</div>
+      </Card>
+
+      <Card style={{width:"100%"}}>
+        <div style={{fontSize:12,color:C.muted,marginBottom:10}}>BUGÜNKÜ GİRİŞ/ÇIKIŞLAR</div>
+        {sonGirisler.map(k=>(
+          <div key={k.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:"1px solid "+C.border}}>
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <span style={{fontSize:16}}>{k.tip==="giris"?"🟢":"🔴"}</span>
+              <span style={{fontWeight:600,fontSize:13}}>{k.personel?.ad || "Bilinmeyen"}</span>
+            </div>
+            <div style={{textAlign:"right"}}>
+              <div style={{fontSize:12,color:k.tip==="giris"?C.green:C.red,fontWeight:600}}>{k.tip==="giris"?"Giriş":"Çıkış"}</div>
+              <div style={{fontSize:11,color:C.muted}}>{new Date(k.zaman).toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit"})}</div>
+            </div>
+          </div>
+        ))}
+        {!sonGirisler.length && <div style={{color:C.muted,textAlign:"center",padding:16,fontSize:13}}>Bugün henüz giriş/çıkış yok</div>}
+      </Card>
+    </div>
+  );
+};
+
+// ── MESAİ TARAMA SAYFASI (PERSONELİN TELEFONUNDA AÇILAN SAYFA) ───────────────
+const MesaiTarama = ({ token, isletmeId }) => {
+  const [durum, setDurum] = useState("yukleniyor"); // yukleniyor | gecersiz | secim | basarili | hata
+  const [personeller, setPersoneller] = useState([]);
+  const [seciliPersonel, setSeciliPersonel] = useState(null);
+  const [sonTip, setSonTip] = useState(null);
+  const [mesaj, setMesaj] = useState("");
+
+  useEffect(() => { kontrolEt(); }, []);
+
+  const kontrolEt = async () => {
+    const { data: tokenData } = await sb.from("mesai_tokens").select("*").eq("token", token).eq("isletme_id", isletmeId).single();
+    if (!tokenData || new Date(tokenData.expires_at) < new Date()) {
+      setDurum("gecersiz");
+      return;
+    }
+    const { data: pdata } = await sb.from("personel").select("*").eq("isletme_id", isletmeId).order("ad");
+    setPersoneller(pdata || []);
+    setDurum("secim");
+  };
+
+  const islemYap = async (personel) => {
+    setSeciliPersonel(personel);
+    setDurum("yukleniyor");
+    // Son kaydı kontrol et, giriş mi çıkış mı olacağını belirle
+    const { data: sonKayit } = await sb.from("mesai_kayitlari").select("*").eq("personel_id", personel.id)
+      .order("zaman", {ascending:false}).limit(1).single();
+    const yeniTip = (sonKayit && sonKayit.tip === "giris") ? "cikis" : "giris";
+    const { error } = await sb.from("mesai_kayitlari").insert({
+      isletme_id: isletmeId, personel_id: personel.id, tip: yeniTip, zaman: new Date().toISOString(),
+    });
+    if (error) { setMesaj("Hata: "+error.message); setDurum("hata"); return; }
+    setSonTip(yeniTip);
+    setDurum("basarili");
+  };
+
+  if (durum === "yukleniyor") return (
+    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:C.bg}}><Spinner/></div>
+  );
+
+  if (durum === "gecersiz") return (
+    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:C.bg,padding:24,textAlign:"center"}}>
+      <div style={{fontSize:48,marginBottom:16}}>⏰</div>
+      <div style={{fontFamily:"Syne",fontSize:20,fontWeight:700,color:C.red,marginBottom:8}}>QR Kodun Süresi Doldu</div>
+      <div style={{color:C.muted,fontSize:14}}>Lütfen ekrandaki yeni QR kodu tekrar okutun.</div>
+    </div>
+  );
+
+  if (durum === "hata") return (
+    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:C.bg,padding:24,textAlign:"center"}}>
+      <div style={{fontSize:48,marginBottom:16}}>⚠️</div>
+      <div style={{color:C.red,fontSize:14}}>{mesaj}</div>
+    </div>
+  );
+
+  if (durum === "basarili") return (
+    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:C.bg,padding:24,textAlign:"center"}}>
+      <div style={{fontSize:64,marginBottom:16}}>{sonTip==="giris"?"🟢":"🔴"}</div>
+      <div style={{fontFamily:"Syne",fontSize:22,fontWeight:800,color:sonTip==="giris"?C.green:C.red,marginBottom:8}}>
+        {sonTip==="giris" ? "Mesai Başladı!" : "Mesai Bitti!"}
+      </div>
+      <div style={{color:C.text,fontSize:16,fontWeight:600,marginBottom:4}}>{seciliPersonel?.ad}</div>
+      <div style={{color:C.muted,fontSize:13}}>{new Date().toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit"})}</div>
+    </div>
+  );
+
+  return (
+    <div style={{minHeight:"100vh",background:C.bg,padding:24}}>
+      <div style={{textAlign:"center",marginBottom:24}}>
+        <div style={{fontSize:40,marginBottom:8}}>⏱️</div>
+        <div style={{fontFamily:"Syne",fontSize:20,fontWeight:700,color:C.accent}}>Kim Mesaiye Giriyor?</div>
+        <div style={{color:C.muted,fontSize:13,marginTop:4}}>Adını seç ve giriş/çıkış kaydet</div>
+      </div>
+      <div style={{display:"flex",flexDirection:"column",gap:10,maxWidth:380,margin:"0 auto"}}>
+        {personeller.map(p=>(
+          <button key={p.id} onClick={()=>islemYap(p)}
+            style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,padding:"16px 18px",display:"flex",alignItems:"center",gap:12,cursor:"pointer",textAlign:"left"}}>
+            <div style={{width:40,height:40,borderRadius:"50%",background:C.accent+"22",color:C.accent,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:16,flexShrink:0}}>
+              {p.ad.charAt(0).toUpperCase()}
+            </div>
+            <div>
+              <div style={{fontWeight:700,fontSize:15,color:C.text}}>{p.ad}</div>
+              <div style={{fontSize:12,color:C.muted}}>{p.pozisyon}</div>
+            </div>
+          </button>
+        ))}
+        {!personeller.length && <div style={{color:C.muted,textAlign:"center",padding:30}}>Henüz personel kaydı yok</div>}
+      </div>
+    </div>
+  );
+};
+
+
 function App() {
+  // Mesai QR tarama linki kontrolü — giriş gerektirmez
+  const urlParams = new URLSearchParams(window.location.search);
+  const mesaiToken = urlParams.get("mesai");
+  const mesaiIsletmeId = urlParams.get("isletme");
+
   const [kullanici, setKullanici] = useState(null);
   const [yukleniyor, setYukleniyor] = useState(true);
   const [sayfa, setSayfa] = useState("dashboard");
@@ -2232,9 +2714,14 @@ function App() {
   const [satislar, setSatislar] = useState([]);
   const [kategoriler, setKategoriler] = useState([]);
   const [masraflar, setMasraflar] = useState([]);
+  const [personeller, setPersoneller] = useState([]);
   const [tema, setTema] = useState(function() { return localStorage.getItem("tema") || "dark"; });
   const [cevrimici, setCevrimici] = useState(navigator.onLine);
   const [navAcik, setNavAcik] = useState(false);
+
+  if (mesaiToken && mesaiIsletmeId) {
+    return <MesaiTarama token={mesaiToken} isletmeId={mesaiIsletmeId} />;
+  }
 
   useEffect(() => {
     if (tema === "light") {
@@ -2284,14 +2771,15 @@ function App() {
 
   const veriYukle = async (isletmeId) => {
     try {
-      const [r1, r2, r3, r4, r5] = await Promise.all([
+      const [r1, r2, r3, r4, r5, r6] = await Promise.all([
         sb.from("malzemeler").select("*").eq("isletme_id", isletmeId),
         sb.from("menu").select("*").eq("isletme_id", isletmeId),
         sb.from("satislar").select("*").eq("isletme_id", isletmeId).order("tarih", { ascending: false }).limit(200),
         sb.from("kategoriler").select("*").eq("isletme_id", isletmeId).order("sira"),
         sb.from("masraflar").select("*").eq("isletme_id", isletmeId).order("tarih", { ascending: false }).limit(200),
+        sb.from("personel").select("*").eq("isletme_id", isletmeId).order("ad"),
       ]);
-      setMalzemeler(r1.data || []); setMenu(r2.data || []); setSatislar(r3.data || []); setKategoriler(r4.data || []); setMasraflar(r5.data || []);
+      setMalzemeler(r1.data || []); setMenu(r2.data || []); setSatislar(r3.data || []); setKategoriler(r4.data || []); setMasraflar(r5.data || []); setPersoneller(r6.data || []);
       localCache.set("malzemeler_" + isletmeId, r1.data || []);
       localCache.set("menu_" + isletmeId, r2.data || []);
       localCache.set("satislar_" + isletmeId, r3.data || []);
@@ -2329,6 +2817,9 @@ function App() {
     { id: "mutfak",     icon: "👨‍🍳", label: "Mutfak" },
     { id: "paket",      icon: "🛵", label: "Paket" },
     { id: "personel",   icon: "👥", label: "Personel" },
+    { id: "gorevler",   icon: "📋", label: "Görevler" },
+    { id: "vardiya",    icon: "🗓️", label: "Vardiya" },
+    { id: "mesai",      icon: "⏱️", label: "Mesai Girişi" },
     { id: "masraflar",  icon: "💸", label: "Masraf" },
     { id: "fatura",     icon: "🧾", label: "Faturalar" },
     { id: "satinalma",  icon: "🛒", label: "Satın Alma" },
@@ -2378,6 +2869,9 @@ function App() {
         {sayfa === "mutfak"     && erisim.includes("mutfak")     && <MutfakEkrani isletmeId={kullanici.isletme_id} />}
         {sayfa === "paket"      && erisim.includes("paket")      && <PaketSiparis isletmeId={kullanici.isletme_id} kullaniciId={kullanici.id} menu={menu} malzemeler={malzemeler} setMalzemeler={setMalzemeler} setSatislar={setSatislar} accent={accent} kategoriler={kategoriler} />}
         {sayfa === "personel"   && erisim.includes("personel")   && <Personel isletmeId={kullanici.isletme_id} />}
+        {sayfa === "gorevler"   && erisim.includes("gorevler")   && <Gorevler isletmeId={kullanici.isletme_id} personeller={personeller} />}
+        {sayfa === "vardiya"    && erisim.includes("vardiya")    && <VardiyaPlani isletmeId={kullanici.isletme_id} personeller={personeller} />}
+        {sayfa === "mesai"      && erisim.includes("mesai")      && <MesaiEkrani isletmeId={kullanici.isletme_id} isletmeAd={isletme?.ad} accent={accent} />}
         {sayfa === "masraflar"  && erisim.includes("masraflar")  && <Masraflar isletmeId={kullanici.isletme_id} masraflar={masraflar} setMasraflar={setMasraflar} />}
         {sayfa === "qrmenu"     && erisim.includes("qrmenu")     && <QRMenu isletme={isletme} menu={menu} kategoriler={kategoriler} />}
         {sayfa === "raporlar"   && erisim.includes("raporlar")   && <Raporlar satislar={satislar} menu={menu} malzemeler={malzemeler} isletme={isletme} masraflar={masraflar} />}
