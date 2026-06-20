@@ -2528,19 +2528,28 @@ const MesaiEkrani = ({ isletmeId, isletmeAd, accent }) => {
   const [token, setToken] = useState(null);
   const [saniye, setSaniye] = useState(30);
   const [sonGirisler, setSonGirisler] = useState([]);
+  const [hata, setHata] = useState("");
   const SURE = 30; // saniye
 
   const tokenUret = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
 
   const yeniQrUret = async () => {
-    const yeniToken = tokenUret();
-    const expiresAt = new Date(Date.now() + SURE*1000).toISOString();
-    await sb.from("mesai_tokens").insert({ isletme_id: isletmeId, token: yeniToken, expires_at: expiresAt });
-    setToken(yeniToken);
-    const url = window.location.origin + window.location.pathname + "?mesai=" + yeniToken + "&isletme=" + isletmeId;
-    const dataUrl = await QRCode.toDataURL(url, { width: 280, margin: 2, color: { dark: "#000000", light: "#ffffff" } });
-    setQrDataUrl(dataUrl);
-    setSaniye(SURE);
+    try {
+      setHata("");
+      const yeniToken = tokenUret();
+      const expiresAt = new Date(Date.now() + SURE*1000).toISOString();
+      const { error: insertErr } = await sb.from("mesai_tokens").insert({ isletme_id: isletmeId, token: yeniToken, expires_at: expiresAt });
+      if (insertErr) { setHata("Token kaydedilemedi: " + insertErr.message); return; }
+      setToken(yeniToken);
+      const url = window.location.origin + window.location.pathname + "?mesai=" + yeniToken + "&isletme=" + isletmeId;
+      const QR = (typeof QRCode !== "undefined") ? QRCode : (typeof window.qrcode !== "undefined" ? window.qrcode : null);
+      if (!QR) { setHata("QR kütüphanesi yüklenemedi. İnternet bağlantınızı kontrol edin."); return; }
+      const dataUrl = await QR.toDataURL(url, { width: 280, margin: 2, color: { dark: "#000000", light: "#ffffff" } });
+      setQrDataUrl(dataUrl);
+      setSaniye(SURE);
+    } catch (e) {
+      setHata("QR oluşturma hatası: " + e.message);
+    }
   };
 
   useEffect(() => {
@@ -2575,7 +2584,12 @@ const MesaiEkrani = ({ isletmeId, isletmeAd, accent }) => {
       </div>
 
       <Card style={{padding:24,display:"flex",flexDirection:"column",alignItems:"center",gap:14,width:"100%",maxWidth:340}}>
-        {qrDataUrl ? (
+        {hata ? (
+          <div style={{color:C.red,fontSize:13,textAlign:"center",padding:"20px 0"}}>
+            ⚠️ {hata}
+            <div style={{marginTop:12}}><Btn small onClick={yeniQrUret}>Tekrar Dene</Btn></div>
+          </div>
+        ) : qrDataUrl ? (
           <img src={qrDataUrl} style={{width:"100%",maxWidth:260,borderRadius:12,background:"#fff",padding:8}} />
         ) : <Spinner/>}
         <div style={{display:"flex",alignItems:"center",gap:8,width:"100%"}}>
