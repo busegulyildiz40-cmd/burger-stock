@@ -2361,7 +2361,7 @@ const VardiyaPlani = ({ isletmeId, personeller }) => {
   const [vardiyalar, setVardiyalar] = useState([]);
   const [gorunum, setGorunum] = useState("takvim"); // takvim | liste
   const [modal, setModal] = useState(false);
-  const [form, setForm] = useState({ personel_id:"", tarih:new Date().toISOString().split("T")[0], baslangic:"09:00", bitis:"18:00", not:"" });
+  const [form, setForm] = useState({ personel_id:"", tarih:new Date().toISOString().split("T")[0], baslangic:"09:00", bitis:"18:00", aciklama:"" });
   const [haftaOfset, setHaftaOfset] = useState(0);
   const [yukleniyor, setYukleniyor] = useState(true);
 
@@ -2378,11 +2378,11 @@ const VardiyaPlani = ({ isletmeId, personeller }) => {
     if (!form.personel_id || !form.tarih || !form.baslangic) return;
     const { data } = await sb.from("shift_plani").insert({
       isletme_id: isletmeId, personel_id: +form.personel_id, tarih: form.tarih,
-      baslangic: form.baslangic, bitis: form.bitis, not: form.not,
+      baslangic: form.baslangic, bitis: form.bitis, aciklama: form.aciklama,
     }).select().single();
     setVardiyalar(v => [...v, data]);
     setModal(false);
-    setForm({ personel_id:"", tarih:new Date().toISOString().split("T")[0], baslangic:"09:00", bitis:"18:00", not:"" });
+    setForm({ personel_id:"", tarih:new Date().toISOString().split("T")[0], baslangic:"09:00", bitis:"18:00", aciklama:"" });
   };
 
   const sil = async (id) => {
@@ -2482,7 +2482,7 @@ const VardiyaPlani = ({ isletmeId, personeller }) => {
                 <div>
                   <div style={{fontWeight:700,fontSize:14,color:personelRenk(v.personel_id)}}>{personelAd(v.personel_id)}</div>
                   <div style={{fontSize:12,color:C.muted,marginTop:2}}>{new Date(v.tarih).toLocaleDateString("tr-TR",{weekday:"long",day:"2-digit",month:"2-digit"})}</div>
-                  {v.not && <div style={{fontSize:11,color:C.muted,marginTop:2}}>{v.not}</div>}
+                  {v.aciklama && <div style={{fontSize:11,color:C.muted,marginTop:2}}>{v.aciklama}</div>}
                 </div>
                 <div style={{display:"flex",alignItems:"center",gap:10}}>
                   <Badge color={C.accent}>{v.baslangic} - {v.bitis}</Badge>
@@ -2513,7 +2513,7 @@ const VardiyaPlani = ({ isletmeId, personeller }) => {
                 <input type="time" value={form.bitis} onChange={e=>setForm({...form,bitis:e.target.value})} />
               </div>
             </div>
-            <input placeholder="Not (isteğe bağlı)" value={form.not} onChange={e=>setForm({...form,not:e.target.value})} />
+            <input placeholder="Not (isteğe bağlı)" value={form.aciklama} onChange={e=>setForm({...form,aciklama:e.target.value})} />
             <Btn onClick={kaydet} disabled={!form.personel_id||!form.tarih}>Vardiya Ekle</Btn>
           </div>
         </Modal>
